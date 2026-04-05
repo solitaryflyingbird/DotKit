@@ -140,6 +140,41 @@ def save_png(pixels: np.ndarray, path: str) -> None:
     img.save(path)
 
 
+def save_psd(pixels: np.ndarray, path: str) -> None:
+    """RGBA 결과를 PSD로 저장한다. 확인용 배경 레이어 포함."""
+    from psd_tools import PSDImage
+
+    h, w = pixels.shape[:2]
+    psd = PSDImage.new("RGBA", (w, h))
+
+    # 불투명 픽셀의 평균색 → 보색 계산
+    opaque = pixels[:, :, 3] > 0
+    if np.any(opaque):
+        avg_r = np.mean(pixels[opaque, 0])
+        avg_g = np.mean(pixels[opaque, 1])
+        avg_b = np.mean(pixels[opaque, 2])
+    else:
+        avg_r, avg_g, avg_b = 128, 128, 128
+    comp_r, comp_g, comp_b = 255 - int(avg_r), 255 - int(avg_g), 255 - int(avg_b)
+
+    # 확인용 배경: 보색 단색
+    bg = np.full((h, w, 4), 255, dtype=np.uint8)
+    bg[:, :, 0] = comp_r
+    bg[:, :, 1] = comp_g
+    bg[:, :, 2] = comp_b
+
+    # 레이어 순서: cut(위) → bg(아래)
+    # PSD append 순서 = 위에서 아래로
+    cut_layer = psd.create_pixel_layer(
+        name="cut", image=Image.fromarray(pixels, "RGBA"))
+    bg_layer = psd.create_pixel_layer(
+        name="bg", image=Image.fromarray(bg, "RGBA"))
+
+    psd.append(bg_layer)
+    psd.append(cut_layer)
+    psd.save(path)
+
+
 def clean_cut(input_path: str, output_path: str, threshold: int = 10, boundary_depth: int = 1) -> None:
     """스프라이트 추출 파이프라인.
 
@@ -148,7 +183,7 @@ def clean_cut(input_path: str, output_path: str, threshold: int = 10, boundary_d
     3. BFS 배경 마킹
     4. 배경 알파 0 처리
     5. 경계면 감지 및 알파 처리
-    6. PNG 저장
+    6. PSD 저장 (확인용 배경 레이어 포함)
     """
     pixels = load_rgba(input_path)
     seeds = collect_edge_seeds(pixels, threshold)
@@ -157,14 +192,14 @@ def clean_cut(input_path: str, output_path: str, threshold: int = 10, boundary_d
     boundary = find_boundary(bg_mask)
     expanded = expand_boundary(boundary, bg_mask, depth=boundary_depth)
     result = apply_boundary_alpha(result, expanded)
-    save_png(result, output_path)
+    save_psd(result, output_path)
 
 
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 3:
-        print("사용법: python clean_cut.py <입력 이미지> <출력 PNG> [threshold]")
+        print("사용법: python clean_cut.py <입력 이미지> <출력 PSD> [threshold]")
         sys.exit(1)
 
     in_path = sys.argv[1]
