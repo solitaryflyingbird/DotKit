@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest test_clean_cut.py -v)",
+      "Bash(python3 -m pytest test_clean_cut.py -v)",
+      "Bash(pip3 install:*)",
+      "Bash(/opt/homebrew/opt/python@3.10/bin/python3.10 -m pytest --version)",
+      "Bash(/opt/homebrew/opt/python@3.10/bin/python3.10 -m pytest test_clean_cut.py -v)",
+      "Bash(/opt/homebrew/opt/python@3.10/bin/python3.10 clean_cut.py \"테스트 이미지/11.png\" \"테스트 이미지/11_cut.png\")",
+      "Bash(/opt/homebrew/opt/python@3.10/bin/python3.10 -c ':*)",
+      "Bash(/opt/homebrew/opt/python@3.10/bin/python3.10 clean_cut.py \"테스트 이미지/11.png\" \"테스트 이미지/11_cut_v2.png\")",
+      "Bash(/opt/homebrew/opt/python@3.10/bin/python3.10 clean_cut.py \"테스트 이미지/11.png\" \"테스트 이미지/11_cut_v3.png\")",
+      "Bash(/opt/homebrew/opt/python@3.10/bin/python3.10:*)",
+      "Bash(rm:*)",
+      "Skill(update-config)"
+    ]
+  }
+}
