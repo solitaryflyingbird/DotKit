@@ -7,7 +7,7 @@ idle_motion — 스프라이트 idle 애니메이션 생성 도구
 - 지정 영역 X축 강조 팽창/수축 (가슴 등)
 """
 
-from PIL import Image
+from PIL import Image, ImageFilter
 import numpy as np
 import math
 import os
@@ -22,9 +22,37 @@ def load_image(path: str) -> Image.Image:
     return img
 
 
+def _find_largest_span(alpha_row: np.ndarray, threshold: int = 10):
+    """행에서 가장 넓은 불투명 연속 구간(몸통)의 (start, end)를 반환한다."""
+    opaque = alpha_row >= threshold
+    best_start, best_len = 0, 0
+    cur_start, cur_len = 0, 0
+    in_span = False
+
+    for x in range(len(opaque)):
+        if opaque[x]:
+            if not in_span:
+                cur_start = x
+                cur_len = 0
+                in_span = True
+            cur_len += 1
+        else:
+            if in_span:
+                if cur_len > best_len:
+                    best_start, best_len = cur_start, cur_len
+                in_span = False
+    if in_span and cur_len > best_len:
+        best_start, best_len = cur_start, cur_len
+
+    if best_len == 0:
+        return None
+    return best_start, best_start + best_len
+
+
 def apply_x_scale(arr: np.ndarray, top_ratio: float, bot_ratio: float,
                   sx: float, width: int) -> np.ndarray:
-    """지정 y 영역에 가우시안 분포로 X축 스케일을 적용한다."""
+    """지정 y 영역에 가우시안 분포로 X축 스케일을 적용한다.
+    각 행에서 가장 넓은 불투명 덩어리(몸통)만 스케일하고 나머지(팔 등)는 유지."""
     h = arr.shape[0]
     top = int(h * top_ratio)
     bot = int(h * bot_ratio)
@@ -42,24 +70,77 @@ def apply_x_scale(arr: np.ndarray, top_ratio: float, bot_ratio: float,
         if abs(local_sx - 1.0) < 0.001:
             continue
 
-        row = Image.fromarray(arr[y:y+1, :, :])
-        new_w = int(width * local_sx)
-        row_scaled = row.resize((new_w, 1), Image.LANCZOS)
-        row_arr = np.array(row_scaled)
+        # 가장 넓은 불투명 구간(몸통) 찾기
+        span = _find_largest_span(arr[y, :, 3])
+        if span is None:
+            continue
+        s_start, s_end = span
+        s_width = s_end - s_start
 
-        offset = (new_w - width) // 2
-        if new_w >= width:
-            arr[y, :, :] = row_arr[0, offset:offset+width, :]
-        else:
-            start = (width - new_w) // 2
-            arr[y, :, :] = 0
-            arr[y, start:start+new_w, :] = row_arr[0, :, :]
+        # 몸통 부분만 추출해서 스케일
+        body = Image.fromarray(arr[y:y+1, s_start:s_end, :])
+        new_bw = max(1, int(s_width * local_sx))
+        body_scaled = np.array(body.resize((new_bw, 1), Image.LANCZOS))[0]
+
+        # 몸통 영역을 새 크기로 교체 (중심 정렬)
+        body_center = (s_start + s_end) // 2
+        new_start = body_center - new_bw // 2
+        new_end = new_start + new_bw
+
+        # 원본 행 백업 (팔 등 보존용)
+        row_backup = arr[y, :, :].copy()
+        # 몸통 원래 자리 지우기
+        arr[y, s_start:s_end, :] = 0
+
+        # 클리핑
+        src_l = max(0, -new_start)
+        src_r = new_bw - max(0, new_end - width)
+        dst_l = max(0, new_start)
+        dst_r = min(width, new_end)
+
+        if dst_r > dst_l and src_r > src_l:
+            arr[y, dst_l:dst_r, :] = body_scaled[src_l:src_r, :]
+
+        # 팔 등 몸통 바깥 영역 복원
+        arr[y, :s_start, :] = row_backup[:s_start, :]
+        if s_end < width:
+            arr[y, s_end:, :] = row_backup[s_end:, :]
 
     return arr
 
 
+def apply_body_scale_x(img: Image.Image, top_ratio: float, bot_ratio: float,
+                       sx: float) -> Image.Image:
+    """몸 전체 X축 스케일을 2D 영역 통째로 적용한다 (울렁임 방지)."""
+    if abs(sx - 1.0) < 0.001:
+        return img
+
+    w, h = img.size
+    top = int(h * top_ratio)
+    bot = int(h * bot_ratio)
+    region_h = bot - top
+    if region_h <= 0:
+        return img
+
+    # 영역 추출 → 통째 리사이즈 → 중심 정렬로 붙여넣기
+    region = img.crop((0, top, w, bot))
+    new_w = max(1, int(w * sx))
+    region_scaled = region.resize((new_w, region_h), Image.LANCZOS)
+
+    result = img.copy()
+    # 영역 지우기
+    clear = Image.new("RGBA", (w, region_h), (0, 0, 0, 0))
+    result.paste(clear, (0, top))
+    # 중심 정렬로 붙이기
+    offset_x = (w - new_w) // 2
+    result.paste(region_scaled, (offset_x, top), region_scaled)
+
+    return result
+
+
 def create_frame(src_img: Image.Image, x_off: int, y_off: int,
-                 scale_y: float, x_scales: list, pad: int) -> Image.Image:
+                 scale_y: float, body_sx: float, body_range: tuple,
+                 emphasis_scales: list, pad: int) -> Image.Image:
     """한 프레임을 생성한다.
 
     Args:
@@ -67,7 +148,9 @@ def create_frame(src_img: Image.Image, x_off: int, y_off: int,
         x_off: X축 정수 오프셋
         y_off: Y축 정수 오프셋
         scale_y: Y축 스케일 (1.0 = 원본)
-        x_scales: [(top_ratio, bot_ratio, scale_x), ...] 영역별 X축 스케일
+        body_sx: 몸 전체 X축 스케일 (2D 통째 리사이즈)
+        body_range: 몸 전체 X축 스케일 영역 (top_ratio, bot_ratio)
+        emphasis_scales: [(top_ratio, bot_ratio, scale_x), ...] 강조 영역 X축 스케일
         pad: 캔버스 여백
     """
     w, h = src_img.size
@@ -77,13 +160,22 @@ def create_frame(src_img: Image.Image, x_off: int, y_off: int,
     # Y축 스케일
     new_h = int(h * scale_y)
     scaled = src_img.resize((w, new_h), Image.LANCZOS)
-    result_arr = np.array(scaled)
 
-    # X축 스케일 (영역별, 순서대로 적용)
-    for top_r, bot_r, sx in x_scales:
-        result_arr = apply_x_scale(result_arr, top_r, bot_r, sx, w)
+    # 몸 전체 X축 스케일 (2D 통째)
+    scaled = apply_body_scale_x(scaled, body_range[0], body_range[1], body_sx)
 
-    result_img = Image.fromarray(result_arr, "RGBA")
+    # 강조 영역 X축 스케일 (2D 통째)
+    for top_r, bot_r, sx in emphasis_scales:
+        scaled = apply_body_scale_x(scaled, top_r, bot_r, sx)
+
+    # 불투명 영역에만 가우시안 블러 (계단 현상 완화)
+    arr = np.array(scaled)
+    blurred = scaled.filter(ImageFilter.GaussianBlur(radius=0.8))
+    blur_arr = np.array(blurred)
+    # 알파 > 0 인 픽셀(PNG 객체)만 블러 적용, 투명 영역은 그대로
+    mask = arr[:, :, 3] > 0
+    arr[mask] = blur_arr[mask]
+    result_img = Image.fromarray(arr, "RGBA")
 
     # 캔버스에 배치 (하단 고정)
     frame = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
@@ -131,14 +223,15 @@ def make_idle(input_path: str, output_path: str,
 
     frames = []
     for i in range(num_frames):
-        # X축 스케일 목록 구성
-        x_scales = [(body_range[0], body_range[1], body_scale_x[i])]
+        # 강조 영역 X축 스케일 목록
+        emp_scales = []
         for emp in emphasis_ranges:
-            x_scales.append((emp["range"][0], emp["range"][1], emp["scales"][i]))
+            emp_scales.append((emp["range"][0], emp["range"][1], emp["scales"][i]))
 
         frame = create_frame(
             src, x_offsets[i], y_offsets[i],
-            scale_y_list[i], x_scales, pad
+            scale_y_list[i], body_scale_x[i], body_range,
+            emp_scales, pad
         )
         frames.append(frame)
 

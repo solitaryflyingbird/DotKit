@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>idle_motion 미리보기</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #1a1a1a;
+    font-family: sans-serif;
+    color: #ccc;
+  }
+  h1 { font-size: 1.2rem; margin-bottom: 1rem; }
+  .preview {
+    display: flex;
+    gap: 2rem;
+    align-items: flex-end;
+  }
+  .preview figure {
+    margin: 0;
+    text-align: center;
+  }
+  .preview img {
+    image-rendering: pixelated;
+    border: 1px solid #333;
+    background: #2a2a2a;
+  }
+  figcaption { margin-top: 0.5rem; font-size: 0.85rem; }
+  .controls {
+    margin-top: 1.5rem;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+  }
+  label { font-size: 0.85rem; }
+  input[type=range] { width: 200px; }
+</style>
+</head>
+<body>
+  <h1>idle_motion 미리보기</h1>
+  <div class="preview">
+    <figure>
+      <img id="gif" src="ninja_nsfw_idle.gif" alt="idle GIF">
+      <figcaption>GIF 애니메이션</figcaption>
+    </figure>
+    <figure>
+      <img id="sheet" src="ninja_nsfw_idle_sheet.png" alt="스프라이트시트" style="max-width:600px;">
+      <figcaption>스프라이트시트</figcaption>
+    </figure>
+  </div>
+  <div class="controls">
+    <label>확대: <span id="scaleVal">2</span>x</label>
+    <input type="range" id="scale" min="1" max="6" value="2" step="1">
+  </div>
+  <script>
+    const scaleSlider = document.getElementById('scale');
+    const scaleVal = document.getElementById('scaleVal');
+    const gif = document.getElementById('gif');
+    const sheet = document.getElementById('sheet');
+
+    function updateScale() {
+      const s = scaleSlider.value;
+      scaleVal.textContent = s;
+      gif.style.width = (gif.naturalWidth * s) + 'px';
+      sheet.style.maxWidth = (sheet.naturalWidth * s) + 'px';
+    }
+
+    gif.onload = updateScale;
+    scaleSlider.addEventListener('input', updateScale);
+  </script>
+</body>
+</html>
