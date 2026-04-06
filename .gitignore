@@ -2,3 +2,10 @@
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# 테스트 이미지/작업물
+예시 이미지들/
+이전 프로젝트/
+1. clean_cut/테스트 이미지/
+2. idle_motion/config_chest.json
+2. idle_motion/idle_motion_test.py

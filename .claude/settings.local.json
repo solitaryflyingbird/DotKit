@@ -12,7 +12,15 @@
       "Bash(/opt/homebrew/opt/python@3.10/bin/python3.10 clean_cut.py \"테스트 이미지/11.png\" \"테스트 이미지/11_cut_v3.png\")",
       "Bash(/opt/homebrew/opt/python@3.10/bin/python3.10:*)",
       "Bash(rm:*)",
-      "Skill(update-config)"
+      "Skill(update-config)",
+      "WebSearch",
+      "WebFetch(domain:officialinspire.github.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.adriancourreges.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:www.compuphase.com)",
+      "Skill(schedule)",
+      "Bash(gh search:*)"
     ]
   }
 }
