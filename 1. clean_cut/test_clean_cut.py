@@ -121,16 +121,34 @@ def test_boundary_alpha_white_pixel():
     assert result[0, 0, 3] == 0
 
 
-def test_boundary_alpha_gray_pixel():
-    """회색(128,128,128) 경계 픽셀 → 알파 ≈ 128"""
+def test_boundary_alpha_midgray_pixel():
+    """중간 회색(128,128,128) → 채도=0, 명도=0.5(검정보호 이상) → 채도 규칙으로 완전 투명"""
     pixels = np.array([[[128, 128, 128, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
-    assert 125 <= result[0, 0, 3] <= 131
+    assert result[0, 0, 3] == 0
+
+
+def test_boundary_alpha_dark_gray_protected():
+    """짙은 회색(40,40,40) → 명도≈0.157 < 검정보호(0.3) → 채도 규칙 무시, 명도 알파만"""
+    pixels = np.array([[[40, 40, 40, 255]]], dtype=np.uint8)
+    mask = np.array([[True]])
+    result = apply_boundary_alpha(pixels, mask)
+    # brightness_alpha = (1 - 40/255) * 255 ≈ 215
+    assert 213 <= result[0, 0, 3] <= 217
+
+
+def test_boundary_alpha_saturated_pixel():
+    """선명한 파랑(50,50,200) → chroma≈0.59 > threshold(0.15) → 채도 규칙 무영향, 명도 알파만"""
+    pixels = np.array([[[50, 50, 200, 255]]], dtype=np.uint8)
+    mask = np.array([[True]])
+    result = apply_boundary_alpha(pixels, mask)
+    # brightness ≈ 100/255 ≈ 0.392, brightness_alpha ≈ 155
+    assert 153 <= result[0, 0, 3] <= 157
 
 
 def test_boundary_alpha_black_pixel():
-    """검정(0,0,0) 경계 픽셀 → 알파 = 255"""
+    """검정(0,0,0) 경계 픽셀 → 명도=0이라 검정보호 발동, 알파 = 255"""
     pixels = np.array([[[0, 0, 0, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)

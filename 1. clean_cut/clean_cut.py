@@ -167,10 +167,24 @@ def expand_boundary(boundary: np.ndarray, bg_mask: np.ndarray, depth: int = 1) -
     return expanded
 
 
-def apply_boundary_alpha(pixels: np.ndarray, boundary_mask: np.ndarray) -> np.ndarray:
-    """경계면 픽셀의 밝기(흰색 근접도)에 반비례하여 알파를 매핑한다.
+def apply_boundary_alpha(
+    pixels: np.ndarray,
+    boundary_mask: np.ndarray,
+    saturation_threshold: float = 0.15,
+    black_protect_brightness: float = 0.3,
+) -> np.ndarray:
+    """경계면 픽셀에 명도 + 채도 기반 알파를 적용한다.
 
-    흰색에 가까울수록 투명, 오브젝트 본래 색에 가까울수록 불투명.
+    두 기준을 동시에 본다:
+    - **명도 기준 (기존)**: 흰색에 가까울수록 투명. alpha = (1 - 명도) * 255
+    - **채도 기준 (신규)**: chroma가 saturation_threshold 이하인 픽셀
+      (= 회색기 도는 픽셀)도 추가 투명화. chroma=0일 때 완전 투명,
+      chroma=threshold면 무영향(255).
+    - **검정 보호**: 명도가 black_protect_brightness 미만이면 채도 규칙을
+      적용하지 않는다. 검정/짙은 회색도 채도 0이라 채도 규칙만 쓰면
+      투명해져 버리기 때문.
+
+    최종 알파 = min(명도_알파, 채도_알파). 둘 중 더 투명한 쪽 채택.
     """
     result = pixels.copy()
     ys, xs = np.where(boundary_mask)
@@ -179,8 +193,23 @@ def apply_boundary_alpha(pixels: np.ndarray, boundary_mask: np.ndarray) -> np.nd
     g = result[ys, xs, 1].astype(float)
     b = result[ys, xs, 2].astype(float)
 
-    whiteness = (r + g + b) / (3.0 * 255.0)
-    alpha = ((1.0 - whiteness) * 255.0).clip(0, 255).astype(np.uint8)
+    brightness = (r + g + b) / (3.0 * 255.0)
+    max_c = np.maximum(np.maximum(r, g), b)
+    min_c = np.minimum(np.minimum(r, g), b)
+    chroma = (max_c - min_c) / 255.0
+
+    # 명도 기반 알파
+    brightness_alpha = (1.0 - brightness) * 255.0
+
+    # 채도 기반 알파: chroma가 threshold 이하면 비례 투명화, 이상이면 무영향(255)
+    saturation_alpha = np.clip(chroma / max(saturation_threshold, 1e-6), 0.0, 1.0) * 255.0
+
+    # 검정 보호: 명도가 일정 미만인 픽셀은 채도 규칙을 무시 (= 채도 알파 255로 마스킹)
+    saturation_alpha = np.where(
+        brightness < black_protect_brightness, 255.0, saturation_alpha
+    )
+
+    alpha = np.minimum(brightness_alpha, saturation_alpha).clip(0, 255).astype(np.uint8)
 
     result[ys, xs, 3] = alpha
     return result
