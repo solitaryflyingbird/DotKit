@@ -22,41 +22,42 @@ def is_white(pixel_rgb, threshold: int = 10) -> bool:
     return (255 - r) <= threshold and (255 - g) <= threshold and (255 - b) <= threshold
 
 
-def collect_edge_seeds(pixels: np.ndarray, threshold: int = 10) -> list[tuple[int, int]]:
-    """이미지 가장자리(테두리)에서 흰색인 픽셀 좌표를 시작점으로 수집한다."""
-    h, w = pixels.shape[:2]
-    seeds = []
-    for y in range(h):
-        for x in range(w):
-            if y == 0 or y == h - 1 or x == 0 or x == w - 1:
-                if is_white(pixels[y, x, :3], threshold):
-                    seeds.append((y, x))
-    return seeds
+def bfs_mark_background(pixels: np.ndarray, threshold: int = 10) -> np.ndarray:
+    """테두리를 따라 돌면서 흰색 시작점에서 즉시 BFS flood-fill로 배경을 마킹한다.
 
-
-def bfs_mark_background(pixels: np.ndarray, seeds: list[tuple[int, int]], threshold: int = 10) -> np.ndarray:
-    """BFS로 시작점에서 인접 흰색 픽셀을 확장하여 배경 영역을 마킹한다.
+    visited 배열을 공유하므로 한 번 채워진 영역은 다시 탐색하지 않으며,
+    이미 visited인 테두리 픽셀은 is_white 검사조차 건너뛴다.
 
     Returns:
         bool 배열 (H x W). True이면 배경.
     """
     h, w = pixels.shape[:2]
     visited = np.zeros((h, w), dtype=bool)
-    queue = deque()
+    queue: deque = deque()
 
-    for y, x in seeds:
-        if not visited[y, x]:
-            visited[y, x] = True
-            queue.append((y, x))
+    def try_seed(y: int, x: int) -> None:
+        if visited[y, x]:
+            return
+        if not is_white(pixels[y, x, :3], threshold):
+            return
+        visited[y, x] = True
+        queue.append((y, x))
+        while queue:
+            cy, cx = queue.popleft()
+            for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                ny, nx = cy + dy, cx + dx
+                if 0 <= ny < h and 0 <= nx < w and not visited[ny, nx]:
+                    if is_white(pixels[ny, nx, :3], threshold):
+                        visited[ny, nx] = True
+                        queue.append((ny, nx))
 
-    while queue:
-        cy, cx = queue.popleft()
-        for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-            ny, nx = cy + dy, cx + dx
-            if 0 <= ny < h and 0 <= nx < w and not visited[ny, nx]:
-                if is_white(pixels[ny, nx, :3], threshold):
-                    visited[ny, nx] = True
-                    queue.append((ny, nx))
+    # 테두리 4변 순회 (꼭짓점 중복 없음)
+    for x in range(w):
+        try_seed(0, x)
+        try_seed(h - 1, x)
+    for y in range(1, h - 1):
+        try_seed(y, 0)
+        try_seed(y, w - 1)
 
     return visited
 
@@ -186,8 +187,7 @@ def clean_cut(input_path: str, output_path: str, threshold: int = 10, boundary_d
     6. 출력 — 확장자가 .psd면 확인용 배경 레이어 포함 PSD, 그 외엔 PNG
     """
     pixels = load_rgba(input_path)
-    seeds = collect_edge_seeds(pixels, threshold)
-    bg_mask = bfs_mark_background(pixels, seeds, threshold)
+    bg_mask = bfs_mark_background(pixels, threshold)
     result = remove_background(pixels, bg_mask)
     boundary = find_boundary(bg_mask)
     expanded = expand_boundary(boundary, bg_mask, depth=boundary_depth)

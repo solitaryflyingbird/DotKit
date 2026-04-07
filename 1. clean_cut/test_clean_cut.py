@@ -7,7 +7,6 @@ import pytest
 from clean_cut import (
     load_rgba,
     is_white,
-    collect_edge_seeds,
     bfs_mark_background,
     remove_background,
     find_boundary,
@@ -45,18 +44,6 @@ def test_load_rgba_white_image(tmp_path):
     assert np.all(pixels == 255)
 
 
-# ── collect_edge_seeds ──
-
-def test_edge_seeds_all_white_border():
-    """10x10 이미지, 테두리가 모두 흰색일 때 시작점 = 테두리 픽셀 수 (36개)"""
-    pixels = np.full((10, 10, 4), 255, dtype=np.uint8)
-    # 내부를 검정으로 채워도 테두리는 흰색
-    pixels[1:9, 1:9, :3] = 0
-
-    seeds = collect_edge_seeds(pixels)
-    assert len(seeds) == 36  # 10*4 - 4(꼭짓점 중복 제거) = 36
-
-
 # ── bfs_mark_background ──
 
 def test_bfs_marks_background_not_object():
@@ -64,8 +51,7 @@ def test_bfs_marks_background_not_object():
     pixels = np.full((20, 20, 4), 255, dtype=np.uint8)
     pixels[8:13, 8:13, :3] = 0  # 중앙 5x5 검정
 
-    seeds = collect_edge_seeds(pixels)
-    mask = bfs_mark_background(pixels, seeds)
+    mask = bfs_mark_background(pixels)
 
     # 배경(흰색 영역)은 마킹됨
     assert mask[0, 0]
@@ -98,8 +84,7 @@ def test_find_boundary():
     pixels = np.full((20, 20, 4), 255, dtype=np.uint8)
     pixels[8:13, 8:13, :3] = 0
 
-    seeds = collect_edge_seeds(pixels)
-    bg_mask = bfs_mark_background(pixels, seeds)
+    bg_mask = bfs_mark_background(pixels)
     boundary = find_boundary(bg_mask)
 
     # 경계면은 5x5 사각형의 외곽 테두리 = 5*4 - 4 = 16개
