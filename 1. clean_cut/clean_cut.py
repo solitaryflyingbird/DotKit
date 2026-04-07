@@ -1,20 +1,31 @@
 """
 clean_cut — 스프라이트 선따기 도구
 
-흰색 배경을 가장자리 BFS로 탐색하여 제거하고,
-경계면 픽셀을 알파 블렌딩하여 깔끔하게 오려낸다.
+마스크 ROI에서 시작하는 BFS flood-fill로 흰 배경을 제거하고,
+경계면 픽셀에 명도+채도 기반 알파를 적용해 깔끔하게 오려낸다.
+
+테두리 자동 BFS는 사용하지 않는다 — 사용자가 마스크로 명시적으로
+지정한 영역만 처리한다.
+
+CLI:
+  python clean_cut.py serve [port]                       웹 인터페이스 시작
+  python clean_cut.py <input> <output> [thresh] [mask]   파일 모드
 """
 
+import base64
+import json
+import os
+import sys
 from collections import deque
-from PIL import Image
+from io import BytesIO
+
 import numpy as np
+from PIL import Image
 
 
-def load_rgba(path: str) -> np.ndarray:
-    """이미지를 RGBA numpy 배열로 로드한다."""
-    img = Image.open(path).convert("RGBA")
-    return np.array(img)
-
+# ============================================================
+# 픽셀 판별
+# ============================================================
 
 def is_white(pixel_rgb, threshold: int = 10) -> bool:
     """RGB 값이 흰색에 충분히 가까운지 판별한다."""
@@ -22,13 +33,60 @@ def is_white(pixel_rgb, threshold: int = 10) -> bool:
     return (255 - r) <= threshold and (255 - g) <= threshold and (255 - b) <= threshold
 
 
-def is_black(pixel_rgb, threshold: int = 10) -> bool:
-    """RGB 값이 검정에 충분히 가까운지 판별한다."""
-    r, g, b = int(pixel_rgb[0]), int(pixel_rgb[1]), int(pixel_rgb[2])
-    return r <= threshold and g <= threshold and b <= threshold
+# ============================================================
+# I/O
+# ============================================================
+
+def load_rgba(path: str) -> np.ndarray:
+    """이미지를 RGBA numpy 배열로 로드한다."""
+    img = Image.open(path).convert("RGBA")
+    return np.array(img)
 
 
-def _flood_from_seed(pixels: np.ndarray, visited: np.ndarray, sy: int, sx: int, threshold: int = 10) -> None:
+def save_png(pixels: np.ndarray, path: str) -> None:
+    """RGBA numpy 배열을 PNG로 저장한다."""
+    Image.fromarray(pixels, "RGBA").save(path)
+
+
+def save_psd(pixels: np.ndarray, path: str) -> None:
+    """RGBA 결과를 PSD로 저장한다. 확인용 보색 배경 레이어 포함."""
+    from psd_tools import PSDImage  # 옵션 의존성
+
+    h, w = pixels.shape[:2]
+    psd = PSDImage.new("RGBA", (w, h))
+
+    opaque = pixels[:, :, 3] > 0
+    if np.any(opaque):
+        avg_r = np.mean(pixels[opaque, 0])
+        avg_g = np.mean(pixels[opaque, 1])
+        avg_b = np.mean(pixels[opaque, 2])
+    else:
+        avg_r, avg_g, avg_b = 128, 128, 128
+    comp_r, comp_g, comp_b = 255 - int(avg_r), 255 - int(avg_g), 255 - int(avg_b)
+
+    bg = np.full((h, w, 4), 255, dtype=np.uint8)
+    bg[:, :, 0] = comp_r
+    bg[:, :, 1] = comp_g
+    bg[:, :, 2] = comp_b
+
+    cut_layer = psd.create_pixel_layer(name="cut", image=Image.fromarray(pixels, "RGBA"))
+    bg_layer = psd.create_pixel_layer(name="bg", image=Image.fromarray(bg, "RGBA"))
+    psd.append(bg_layer)
+    psd.append(cut_layer)
+    psd.save(path)
+
+
+# ============================================================
+# Flood-fill 코어
+# ============================================================
+
+def _flood_from_seed(
+    pixels: np.ndarray,
+    visited: np.ndarray,
+    sy: int,
+    sx: int,
+    threshold: int = 10,
+) -> None:
     """단일 시작점에서 흰색 인접 영역을 BFS flood-fill하여 visited를 in-place로 갱신.
 
     시작점이 이미 visited이거나 흰색이 아니면 아무 일도 하지 않는다.
@@ -51,51 +109,21 @@ def _flood_from_seed(pixels: np.ndarray, visited: np.ndarray, sy: int, sx: int, 
                     queue.append((ny, nx))
 
 
-def bfs_mark_background(pixels: np.ndarray, threshold: int = 10) -> np.ndarray:
-    """테두리를 따라 돌면서 흰색 시작점에서 즉시 BFS flood-fill로 배경을 마킹한다.
-
-    visited 배열을 공유하므로 한 번 채워진 영역은 다시 탐색하지 않으며,
-    이미 visited인 테두리 픽셀은 is_white 검사조차 건너뛴다.
-
-    Returns:
-        bool 배열 (H x W). True이면 배경.
-    """
-    h, w = pixels.shape[:2]
-    visited = np.zeros((h, w), dtype=bool)
-
-    # 테두리 4변 순회 (꼭짓점 중복 없음)
-    for x in range(w):
-        _flood_from_seed(pixels, visited, 0, x, threshold)
-        _flood_from_seed(pixels, visited, h - 1, x, threshold)
-    for y in range(1, h - 1):
-        _flood_from_seed(pixels, visited, y, 0, threshold)
-        _flood_from_seed(pixels, visited, y, w - 1, threshold)
-
-    return visited
-
-
-def extend_background_with_mask(
+def mark_background_from_mask(
     pixels: np.ndarray,
     bg_mask: np.ndarray,
     mask_pixels: np.ndarray,
     threshold: int = 10,
     mask_threshold: int = 10,
 ) -> np.ndarray:
-    """마스크 이미지의 검정 영역 픽셀을 시작점으로 BFS flood-fill을 추가 실행하여
-    bg_mask를 확장한다.
+    """마스크 이미지의 ROI 픽셀을 시작점으로 BFS flood-fill을 실행하여 bg_mask를 갱신한다.
 
-    이미 채워진 영역(테두리 단계 결과)은 visited 공유로 건너뛰므로,
-    마스크 검정 영역의 임의의 한 점만 흰색에 닿아 있어도 그 연결 영역 전체가 채워진다.
+    visited 배열을 공유하므로 한 번 채운 영역은 다시 탐색하지 않는다.
+    이 함수가 유일한 배경 마킹 경로 — 테두리 자동 BFS는 더 이상 사용하지 않는다.
 
-    Args:
-        pixels: 원본 RGBA (H x W x 4)
-        bg_mask: 테두리 단계의 배경 마스크 (in-place로 확장됨)
-        mask_pixels: 원본과 동일 크기의 마스크 이미지 RGBA
-        threshold: 원본 흰색 판별 허용 오차
-        mask_threshold: 마스크에서 검정 ROI 판별 허용 오차
-
-    Returns:
-        확장된 bg_mask (입력과 동일 객체)
+    마스크 ROI 판정 (자동 인식):
+    - HTML 그림판 마스크: 알파>0인 픽셀 (그려진 부분)
+    - 옛 검정 마스크: RGB가 충분히 어두운 픽셀
     """
     h, w = pixels.shape[:2]
     if mask_pixels.shape[:2] != (h, w):
@@ -103,15 +131,23 @@ def extend_background_with_mask(
             f"마스크 크기 {mask_pixels.shape[:2]}가 원본 {(h, w)}와 다름"
         )
 
-    mask_rgb = mask_pixels[..., :3]
-    is_dark = mask_rgb.max(axis=2) <= mask_threshold
-    ys, xs = np.where(is_dark)
+    mask_alpha = mask_pixels[..., 3]
+    if (mask_alpha < 255).any():
+        is_roi = mask_alpha > mask_threshold
+    else:
+        mask_rgb = mask_pixels[..., :3]
+        is_roi = mask_rgb.max(axis=2) <= mask_threshold
 
+    ys, xs = np.where(is_roi)
     for y, x in zip(ys, xs):
         _flood_from_seed(pixels, bg_mask, int(y), int(x), threshold)
 
     return bg_mask
 
+
+# ============================================================
+# 배경 제거 + 경계면 알파
+# ============================================================
 
 def remove_background(pixels: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """배경으로 마킹된 픽셀의 알파를 0으로 설정한다."""
@@ -121,11 +157,7 @@ def remove_background(pixels: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def find_boundary(bg_mask: np.ndarray) -> np.ndarray:
-    """오브젝트(비배경) 픽셀 중 배경과 인접한 픽셀을 경계면으로 식별한다.
-
-    Returns:
-        bool 배열 (H x W). True이면 경계면.
-    """
+    """오브젝트(비배경) 픽셀 중 배경과 인접한 픽셀을 경계면으로 식별한다."""
     h, w = bg_mask.shape
     boundary = np.zeros((h, w), dtype=bool)
     obj_mask = ~bg_mask
@@ -143,11 +175,7 @@ def find_boundary(bg_mask: np.ndarray) -> np.ndarray:
 
 
 def expand_boundary(boundary: np.ndarray, bg_mask: np.ndarray, depth: int = 1) -> np.ndarray:
-    """경계면에서 오브젝트 안쪽으로 depth 픽셀만큼 확장한다.
-
-    Returns:
-        bool 배열 (H x W). True이면 확장된 경계면 영역.
-    """
+    """경계면에서 오브젝트 안쪽으로 depth 픽셀만큼 확장한다."""
     expanded = boundary.copy()
     obj_mask = ~bg_mask
 
@@ -175,16 +203,13 @@ def apply_boundary_alpha(
 ) -> np.ndarray:
     """경계면 픽셀에 명도 + 채도 기반 알파를 적용한다.
 
-    두 기준을 동시에 본다:
-    - **명도 기준 (기존)**: 흰색에 가까울수록 투명. alpha = (1 - 명도) * 255
-    - **채도 기준 (신규)**: chroma가 saturation_threshold 이하인 픽셀
-      (= 회색기 도는 픽셀)도 추가 투명화. chroma=0일 때 완전 투명,
-      chroma=threshold면 무영향(255).
-    - **검정 보호**: 명도가 black_protect_brightness 미만이면 채도 규칙을
-      적용하지 않는다. 검정/짙은 회색도 채도 0이라 채도 규칙만 쓰면
-      투명해져 버리기 때문.
+    - 명도 기준: 흰색에 가까울수록 투명. alpha = (1 - 명도) * 255
+    - 채도 기준: chroma가 saturation_threshold 이하인 픽셀(=회색기)도
+      추가 투명화. chroma=0일 때 완전 투명, chroma=threshold면 무영향.
+    - 검정 보호: 명도가 black_protect_brightness 미만이면 채도 규칙
+      적용하지 않음 (검정/짙은 회색이 같이 투명해지는 것 방지).
 
-    최종 알파 = min(명도_알파, 채도_알파). 둘 중 더 투명한 쪽 채택.
+    최종 알파 = min(명도_알파, 채도_알파).
     """
     result = pixels.copy()
     ys, xs = np.where(boundary_mask)
@@ -198,62 +223,52 @@ def apply_boundary_alpha(
     min_c = np.minimum(np.minimum(r, g), b)
     chroma = (max_c - min_c) / 255.0
 
-    # 명도 기반 알파
     brightness_alpha = (1.0 - brightness) * 255.0
-
-    # 채도 기반 알파: chroma가 threshold 이하면 비례 투명화, 이상이면 무영향(255)
     saturation_alpha = np.clip(chroma / max(saturation_threshold, 1e-6), 0.0, 1.0) * 255.0
-
-    # 검정 보호: 명도가 일정 미만인 픽셀은 채도 규칙을 무시 (= 채도 알파 255로 마스킹)
     saturation_alpha = np.where(
         brightness < black_protect_brightness, 255.0, saturation_alpha
     )
 
     alpha = np.minimum(brightness_alpha, saturation_alpha).clip(0, 255).astype(np.uint8)
-
     result[ys, xs, 3] = alpha
     return result
 
 
-def save_png(pixels: np.ndarray, path: str) -> None:
-    """RGBA numpy 배열을 PNG로 저장한다."""
-    img = Image.fromarray(pixels, "RGBA")
-    img.save(path)
+# ============================================================
+# 파이프라인 — 단일 출처 (파일/HTTP 모두 호출)
+# ============================================================
 
+def run_pipeline(
+    pixels: np.ndarray,
+    mask_pixels=None,
+    threshold: int = 10,
+    boundary_depth: int = 1,
+    saturation_threshold: float = 0.15,
+    black_protect_brightness: float = 0.3,
+) -> np.ndarray:
+    """numpy 배열만 다루는 알고리즘 핵심.
 
-def save_psd(pixels: np.ndarray, path: str) -> None:
-    """RGBA 결과를 PSD로 저장한다. 확인용 배경 레이어 포함."""
-    from psd_tools import PSDImage
+    파일 모드(clean_cut)와 HTTP 모드(_process_bytes)가 둘 다 이 함수를
+    호출한다. 알고리즘 변경은 여기 한 곳만 손대면 모든 진입점에 반영된다.
 
-    h, w = pixels.shape[:2]
-    psd = PSDImage.new("RGBA", (w, h))
-
-    # 불투명 픽셀의 평균색 → 보색 계산
-    opaque = pixels[:, :, 3] > 0
-    if np.any(opaque):
-        avg_r = np.mean(pixels[opaque, 0])
-        avg_g = np.mean(pixels[opaque, 1])
-        avg_b = np.mean(pixels[opaque, 2])
-    else:
-        avg_r, avg_g, avg_b = 128, 128, 128
-    comp_r, comp_g, comp_b = 255 - int(avg_r), 255 - int(avg_g), 255 - int(avg_b)
-
-    # 확인용 배경: 보색 단색
-    bg = np.full((h, w, 4), 255, dtype=np.uint8)
-    bg[:, :, 0] = comp_r
-    bg[:, :, 1] = comp_g
-    bg[:, :, 2] = comp_b
-
-    # 레이어 순서: cut(위) → bg(아래)
-    # PSD append 순서 = 위에서 아래로
-    cut_layer = psd.create_pixel_layer(
-        name="cut", image=Image.fromarray(pixels, "RGBA"))
-    bg_layer = psd.create_pixel_layer(
-        name="bg", image=Image.fromarray(bg, "RGBA"))
-
-    psd.append(bg_layer)
-    psd.append(cut_layer)
-    psd.save(path)
+    mask_pixels=None이면 bg_mask는 전부 False로 시작 → 어떤 배경 제거도
+    일어나지 않음 (no-op). 반드시 마스크가 필요한 설계.
+    """
+    bg_mask = np.zeros(pixels.shape[:2], dtype=bool)
+    if mask_pixels is not None:
+        bg_mask = mark_background_from_mask(
+            pixels, bg_mask, mask_pixels, threshold=threshold
+        )
+    result = remove_background(pixels, bg_mask)
+    boundary = find_boundary(bg_mask)
+    expanded = expand_boundary(boundary, bg_mask, depth=boundary_depth)
+    result = apply_boundary_alpha(
+        result,
+        expanded,
+        saturation_threshold=saturation_threshold,
+        black_protect_brightness=black_protect_brightness,
+    )
+    return result
 
 
 def clean_cut(
@@ -261,44 +276,153 @@ def clean_cut(
     output_path: str,
     threshold: int = 10,
     boundary_depth: int = 1,
-    mask_path: str | None = None,
+    mask_path=None,
 ) -> None:
-    """스프라이트 추출 파이프라인.
-
-    1. 이미지 로드
-    2. 테두리 BFS로 배경 마킹
-    3. (옵션) 마스크 이미지의 검정 영역을 시작점으로 추가 BFS — 갇힌 흰 영역 처리
-    4. 배경 알파 0 처리
-    5. 경계면 감지 및 알파 처리 (테두리/마스크 모두 동일 알고리즘)
-    6. 출력 — 확장자가 .psd면 확인용 배경 레이어 포함 PSD, 그 외엔 PNG
-    """
+    """파일 기반 진입점."""
     pixels = load_rgba(input_path)
-    bg_mask = bfs_mark_background(pixels, threshold)
-    if mask_path:
-        mask_pixels = load_rgba(mask_path)
-        bg_mask = extend_background_with_mask(pixels, bg_mask, mask_pixels, threshold)
-    result = remove_background(pixels, bg_mask)
-    boundary = find_boundary(bg_mask)
-    expanded = expand_boundary(boundary, bg_mask, depth=boundary_depth)
-    result = apply_boundary_alpha(result, expanded)
-
+    mask_pixels = load_rgba(mask_path) if mask_path else None
+    result = run_pipeline(
+        pixels,
+        mask_pixels=mask_pixels,
+        threshold=threshold,
+        boundary_depth=boundary_depth,
+    )
     if output_path.lower().endswith(".psd"):
         save_psd(result, output_path)
     else:
         save_png(result, output_path)
 
 
+# ============================================================
+# HTTP 서버 — 브라우저 그림판 인터페이스
+# ============================================================
+
+def _process_bytes(
+    image_bytes: bytes,
+    mask_bytes,
+    saturation_threshold: float = 0.15,
+    black_protect_brightness: float = 0.3,
+) -> bytes:
+    """HTTP 요청 처리 — 바이트 IO 후 run_pipeline 호출."""
+    img = Image.open(BytesIO(image_bytes)).convert("RGBA")
+    px = np.array(img)
+
+    mask_px = None
+    if mask_bytes:
+        mask_img = Image.open(BytesIO(mask_bytes)).convert("RGBA")
+        if mask_img.size != img.size:
+            mask_img = mask_img.resize(img.size)
+        mask_px = np.array(mask_img)
+
+    result = run_pipeline(
+        px,
+        mask_pixels=mask_px,
+        saturation_threshold=saturation_threshold,
+        black_protect_brightness=black_protect_brightness,
+    )
+
+    out = BytesIO()
+    Image.fromarray(result).save(out, format="PNG")
+    return out.getvalue()
+
+
+def serve(port: int = 8765) -> None:
+    """로컬 HTTP 서버 시작 — http://localhost:<port> 에서 그림판 UI 제공."""
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    index_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+
+    def _strip_data_url(s: str) -> str:
+        if not s:
+            return ""
+        return s.split(",", 1)[1] if "," in s else s
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path in ("/", "/index.html"):
+                try:
+                    with open(index_path, "rb") as f:
+                        content = f.read()
+                except FileNotFoundError:
+                    self.send_error(404, "index.html not found")
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+            else:
+                self.send_error(404)
+
+        def do_POST(self):
+            if self.path != "/process":
+                self.send_error(404)
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            try:
+                data = json.loads(body.decode("utf-8"))
+                image_b64 = _strip_data_url(data.get("image", ""))
+                mask_b64 = _strip_data_url(data.get("mask", ""))
+                if not image_b64:
+                    raise ValueError("image 필드 없음")
+                image_bytes = base64.b64decode(image_b64)
+                mask_bytes = base64.b64decode(mask_b64) if mask_b64 else None
+                sat_threshold = float(data.get("saturation_threshold", 0.15))
+                black_protect = float(data.get("black_protect_brightness", 0.3))
+
+                result_bytes = _process_bytes(
+                    image_bytes,
+                    mask_bytes,
+                    saturation_threshold=sat_threshold,
+                    black_protect_brightness=black_protect,
+                )
+            except Exception as e:
+                err_msg = f"{type(e).__name__}: {e}"
+                self.send_response(500)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(err_msg.encode("utf-8"))
+                return
+
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(result_bytes)))
+            self.end_headers()
+            self.wfile.write(result_bytes)
+
+        def log_message(self, format, *args):
+            sys.stderr.write(f"[{self.log_date_time_string()}] {format % args}\n")
+
+    server = HTTPServer(("localhost", port), Handler)
+    print(f"clean_cut web — http://localhost:{port}")
+    print("Ctrl+C로 종료")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n종료")
+        server.server_close()
+
+
+# ============================================================
+# CLI
+# ============================================================
+
 if __name__ == "__main__":
-    import sys
+    args = sys.argv[1:]
 
-    if len(sys.argv) < 3:
-        print("사용법: python clean_cut.py <입력 이미지> <출력> [threshold] [mask 이미지]")
+    if args and args[0] == "serve":
+        port = int(args[1]) if len(args) > 1 else 8765
+        serve(port=port)
+    elif len(args) >= 2:
+        in_path = args[0]
+        out_path = args[1]
+        thresh = int(args[2]) if len(args) > 2 else 10
+        mask = args[3] if len(args) > 3 else None
+        clean_cut(in_path, out_path, thresh, mask_path=mask)
+        print(f"완료: {out_path}")
+    else:
+        print("사용법:")
+        print("  python clean_cut.py serve [port]                       웹 서버 시작 (기본 8765)")
+        print("  python clean_cut.py <in> <out> [thresh] [mask]         파일 모드")
         sys.exit(1)
-
-    in_path = sys.argv[1]
-    out_path = sys.argv[2]
-    thresh = int(sys.argv[3]) if len(sys.argv) > 3 else 10
-    mask = sys.argv[4] if len(sys.argv) > 4 else None
-
-    clean_cut(in_path, out_path, thresh, mask_path=mask)
-    print(f"완료: {out_path}")
