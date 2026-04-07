@@ -183,7 +183,7 @@ def clean_cut(input_path: str, output_path: str, threshold: int = 10, boundary_d
     3. BFS 배경 마킹
     4. 배경 알파 0 처리
     5. 경계면 감지 및 알파 처리
-    6. PSD 저장 (확인용 배경 레이어 포함)
+    6. 출력 — 확장자가 .psd면 확인용 배경 레이어 포함 PSD, 그 외엔 PNG
     """
     pixels = load_rgba(input_path)
     seeds = collect_edge_seeds(pixels, threshold)
@@ -192,7 +192,11 @@ def clean_cut(input_path: str, output_path: str, threshold: int = 10, boundary_d
     boundary = find_boundary(bg_mask)
     expanded = expand_boundary(boundary, bg_mask, depth=boundary_depth)
     result = apply_boundary_alpha(result, expanded)
-    save_psd(result, output_path)
+
+    if output_path.lower().endswith(".psd"):
+        save_psd(result, output_path)
+    else:
+        save_png(result, output_path)
 
 
 if __name__ == "__main__":

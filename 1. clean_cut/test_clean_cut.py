@@ -68,9 +68,9 @@ def test_bfs_marks_background_not_object():
     mask = bfs_mark_background(pixels, seeds)
 
     # 배경(흰색 영역)은 마킹됨
-    assert mask[0, 0] is np.True_
+    assert mask[0, 0]
     # 검정 사각형 내부는 마킹되지 않음
-    assert mask[10, 10] is np.False_
+    assert not mask[10, 10]
     # 마킹된 개수 = 전체 - 검정 영역
     assert mask.sum() == 20 * 20 - 5 * 5
 
@@ -105,9 +105,9 @@ def test_find_boundary():
     # 경계면은 5x5 사각형의 외곽 테두리 = 5*4 - 4 = 16개
     assert boundary.sum() == 16
     # 내부 중심은 경계가 아님
-    assert boundary[10, 10] is np.False_
+    assert not boundary[10, 10]
     # 사각형 꼭짓점은 경계
-    assert boundary[8, 8] is np.True_
+    assert boundary[8, 8]
 
 
 # ── expand_boundary ──
@@ -123,7 +123,7 @@ def test_expand_boundary_depth():
     # 원래 경계(외곽 36개) + 안쪽 1층(28개) = 64개
     assert expanded.sum() > boundary.sum()
     # 오브젝트 중심은 포함되지 않음
-    assert expanded[10, 10] is np.False_
+    assert not expanded[10, 10]
 
 
 # ── apply_boundary_alpha ──
