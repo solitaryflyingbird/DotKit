@@ -22,6 +22,35 @@ def is_white(pixel_rgb, threshold: int = 10) -> bool:
     return (255 - r) <= threshold and (255 - g) <= threshold and (255 - b) <= threshold
 
 
+def is_black(pixel_rgb, threshold: int = 10) -> bool:
+    """RGB 값이 검정에 충분히 가까운지 판별한다."""
+    r, g, b = int(pixel_rgb[0]), int(pixel_rgb[1]), int(pixel_rgb[2])
+    return r <= threshold and g <= threshold and b <= threshold
+
+
+def _flood_from_seed(pixels: np.ndarray, visited: np.ndarray, sy: int, sx: int, threshold: int = 10) -> None:
+    """단일 시작점에서 흰색 인접 영역을 BFS flood-fill하여 visited를 in-place로 갱신.
+
+    시작점이 이미 visited이거나 흰색이 아니면 아무 일도 하지 않는다.
+    """
+    if visited[sy, sx]:
+        return
+    if not is_white(pixels[sy, sx, :3], threshold):
+        return
+
+    h, w = pixels.shape[:2]
+    visited[sy, sx] = True
+    queue: deque = deque([(sy, sx)])
+    while queue:
+        cy, cx = queue.popleft()
+        for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            ny, nx = cy + dy, cx + dx
+            if 0 <= ny < h and 0 <= nx < w and not visited[ny, nx]:
+                if is_white(pixels[ny, nx, :3], threshold):
+                    visited[ny, nx] = True
+                    queue.append((ny, nx))
+
+
 def bfs_mark_background(pixels: np.ndarray, threshold: int = 10) -> np.ndarray:
     """테두리를 따라 돌면서 흰색 시작점에서 즉시 BFS flood-fill로 배경을 마킹한다.
 
@@ -33,33 +62,55 @@ def bfs_mark_background(pixels: np.ndarray, threshold: int = 10) -> np.ndarray:
     """
     h, w = pixels.shape[:2]
     visited = np.zeros((h, w), dtype=bool)
-    queue: deque = deque()
-
-    def try_seed(y: int, x: int) -> None:
-        if visited[y, x]:
-            return
-        if not is_white(pixels[y, x, :3], threshold):
-            return
-        visited[y, x] = True
-        queue.append((y, x))
-        while queue:
-            cy, cx = queue.popleft()
-            for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                ny, nx = cy + dy, cx + dx
-                if 0 <= ny < h and 0 <= nx < w and not visited[ny, nx]:
-                    if is_white(pixels[ny, nx, :3], threshold):
-                        visited[ny, nx] = True
-                        queue.append((ny, nx))
 
     # 테두리 4변 순회 (꼭짓점 중복 없음)
     for x in range(w):
-        try_seed(0, x)
-        try_seed(h - 1, x)
+        _flood_from_seed(pixels, visited, 0, x, threshold)
+        _flood_from_seed(pixels, visited, h - 1, x, threshold)
     for y in range(1, h - 1):
-        try_seed(y, 0)
-        try_seed(y, w - 1)
+        _flood_from_seed(pixels, visited, y, 0, threshold)
+        _flood_from_seed(pixels, visited, y, w - 1, threshold)
 
     return visited
+
+
+def extend_background_with_mask(
+    pixels: np.ndarray,
+    bg_mask: np.ndarray,
+    mask_pixels: np.ndarray,
+    threshold: int = 10,
+    mask_threshold: int = 10,
+) -> np.ndarray:
+    """마스크 이미지의 검정 영역 픽셀을 시작점으로 BFS flood-fill을 추가 실행하여
+    bg_mask를 확장한다.
+
+    이미 채워진 영역(테두리 단계 결과)은 visited 공유로 건너뛰므로,
+    마스크 검정 영역의 임의의 한 점만 흰색에 닿아 있어도 그 연결 영역 전체가 채워진다.
+
+    Args:
+        pixels: 원본 RGBA (H x W x 4)
+        bg_mask: 테두리 단계의 배경 마스크 (in-place로 확장됨)
+        mask_pixels: 원본과 동일 크기의 마스크 이미지 RGBA
+        threshold: 원본 흰색 판별 허용 오차
+        mask_threshold: 마스크에서 검정 ROI 판별 허용 오차
+
+    Returns:
+        확장된 bg_mask (입력과 동일 객체)
+    """
+    h, w = pixels.shape[:2]
+    if mask_pixels.shape[:2] != (h, w):
+        raise ValueError(
+            f"마스크 크기 {mask_pixels.shape[:2]}가 원본 {(h, w)}와 다름"
+        )
+
+    mask_rgb = mask_pixels[..., :3]
+    is_dark = mask_rgb.max(axis=2) <= mask_threshold
+    ys, xs = np.where(is_dark)
+
+    for y, x in zip(ys, xs):
+        _flood_from_seed(pixels, bg_mask, int(y), int(x), threshold)
+
+    return bg_mask
 
 
 def remove_background(pixels: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -176,18 +227,27 @@ def save_psd(pixels: np.ndarray, path: str) -> None:
     psd.save(path)
 
 
-def clean_cut(input_path: str, output_path: str, threshold: int = 10, boundary_depth: int = 1) -> None:
+def clean_cut(
+    input_path: str,
+    output_path: str,
+    threshold: int = 10,
+    boundary_depth: int = 1,
+    mask_path: str | None = None,
+) -> None:
     """스프라이트 추출 파이프라인.
 
     1. 이미지 로드
-    2. 가장자리 흰색 시작점 수집
-    3. BFS 배경 마킹
+    2. 테두리 BFS로 배경 마킹
+    3. (옵션) 마스크 이미지의 검정 영역을 시작점으로 추가 BFS — 갇힌 흰 영역 처리
     4. 배경 알파 0 처리
-    5. 경계면 감지 및 알파 처리
+    5. 경계면 감지 및 알파 처리 (테두리/마스크 모두 동일 알고리즘)
     6. 출력 — 확장자가 .psd면 확인용 배경 레이어 포함 PSD, 그 외엔 PNG
     """
     pixels = load_rgba(input_path)
     bg_mask = bfs_mark_background(pixels, threshold)
+    if mask_path:
+        mask_pixels = load_rgba(mask_path)
+        bg_mask = extend_background_with_mask(pixels, bg_mask, mask_pixels, threshold)
     result = remove_background(pixels, bg_mask)
     boundary = find_boundary(bg_mask)
     expanded = expand_boundary(boundary, bg_mask, depth=boundary_depth)
@@ -203,12 +263,13 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 3:
-        print("사용법: python clean_cut.py <입력 이미지> <출력 PSD> [threshold]")
+        print("사용법: python clean_cut.py <입력 이미지> <출력> [threshold] [mask 이미지]")
         sys.exit(1)
 
     in_path = sys.argv[1]
     out_path = sys.argv[2]
     thresh = int(sys.argv[3]) if len(sys.argv) > 3 else 10
+    mask = sys.argv[4] if len(sys.argv) > 4 else None
 
-    clean_cut(in_path, out_path, thresh)
+    clean_cut(in_path, out_path, thresh, mask_path=mask)
     print(f"완료: {out_path}")
