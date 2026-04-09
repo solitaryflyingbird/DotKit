@@ -164,7 +164,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   </div>
   <div class="group">
     <span class="label" title="흰색 허용 오차: 높을수록 회색도 배경으로 인식하여 제거">흰색 오차</span>
-    <input type="range" id="whiteThreshold" min="0" max="128" value="10">
+    <input type="range" id="whiteThreshold" min="0" max="255" value="10">
     <input type="number" id="whiteThresholdNum" value="10" style="width:42px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
   </div>
   <div class="group" id="bgColorGroup">
@@ -731,7 +731,7 @@ whiteThresholdSlider.addEventListener('input', (e) => {
 });
 whiteThresholdNum.addEventListener('input', (e) => {
   const v = parseInt(e.target.value, 10) || 0;
-  whiteThresholdSlider.value = Math.max(0, Math.min(128, v));
+  whiteThresholdSlider.value = Math.max(0, Math.min(255, v));
 });
 
 // ============================================================

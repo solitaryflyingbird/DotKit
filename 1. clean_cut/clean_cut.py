@@ -308,6 +308,9 @@ def run_pipeline(
     if roi is not None:
         expanded &= roi
     result = apply_boundary_alpha(result, expanded, strength=boundary_strength, gamma_raw=boundary_gamma)
+
+    # 가드: 원본보다 불투명해지면 원본 유지 (투명화만 허용)
+    result[:, :, 3] = np.minimum(result[:, :, 3], pixels[:, :, 3])
     return result
 
 
