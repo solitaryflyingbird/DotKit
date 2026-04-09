@@ -273,13 +273,25 @@ def run_pipeline(
     일어나지 않음 (no-op). 반드시 마스크가 필요한 설계.
     """
     bg_mask = np.zeros(pixels.shape[:2], dtype=bool)
+    roi = None
     if mask_pixels is not None:
         bg_mask = mark_background_from_mask(
             pixels, bg_mask, mask_pixels, threshold=threshold, confined=confined
         )
+        if confined:
+            # ROI 영역 계산 — 경계면/확장도 이 안으로 제한
+            mask_alpha = mask_pixels[..., 3]
+            if (mask_alpha < 255).any():
+                roi = mask_alpha > 10
+            else:
+                roi = mask_pixels[..., :3].max(axis=2) <= 10
     result = remove_background(pixels, bg_mask)
     boundary = find_boundary(bg_mask)
+    if roi is not None:
+        boundary &= roi
     expanded = expand_boundary(boundary, bg_mask, depth=boundary_depth)
+    if roi is not None:
+        expanded &= roi
     result = apply_boundary_alpha(result, expanded, strength=boundary_strength, gamma_raw=boundary_gamma)
     return result
 

@@ -170,11 +170,6 @@ body { display: flex; flex-direction: column; overflow: hidden; }
     <input type="range" id="whiteThreshold" min="0" max="128" value="10">
     <input type="number" id="whiteThresholdNum" value="10" style="width:42px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
   </div>
-  <div class="group">
-    <span class="label" title="투명 영역에서 안쪽으로 추가 명도 투명화할 픽셀 수">경계 확장</span>
-    <input type="number" id="boundaryDepth" min="0" max="50" value="0" style="width:42px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
-    <span class="label">px</span>
-  </div>
   <div class="group" id="bgColorGroup">
     <span class="label">배경</span>
     <div class="bg-swatch bg-swatch-checker active" data-bg="checker" title="체커보드"></div>
@@ -258,7 +253,6 @@ const statusText = $('#statusText');
 
 const whiteThresholdSlider = $('#whiteThreshold');
 const whiteThresholdNum = $('#whiteThresholdNum');
-const depthInput = $('#boundaryDepth');
 const cursorOverlay = $('#cursorOverlay');
 const zoomSlider = $('#zoomSlider');
 const zoomLabel = $('#zoomLabel');
@@ -762,7 +756,7 @@ async function runAlgorithm(confined = false) {
         white_threshold: parseInt(whiteThresholdNum.value, 10) || 10,
         boundary_strength: 100,
         boundary_gamma: 100,
-        boundary_depth: parseInt(depthInput.value, 10) || 0,
+        boundary_depth: 0,
         confined: confined,
       }),
     });
