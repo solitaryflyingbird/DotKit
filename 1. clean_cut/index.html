@@ -168,13 +168,23 @@ body { display: flex; flex-direction: column; overflow: hidden; }
     <button id="undoBtn">실행취소</button>
   </div>
   <div class="group">
-    <span class="label" title="높을수록 밝은 경계 픽셀도 투명화, 기존 투명도도 강화">명도 강도</span>
-    <input type="range" id="boundaryStrength" min="0" max="100" value="60">
-    <span id="strengthLabel">60</span>
+    <span class="label" title="흰색 허용 오차: 높을수록 회색도 배경으로 인식하여 제거">흰색 오차</span>
+    <input type="range" id="whiteThreshold" min="0" max="128" value="10">
+    <input type="number" id="whiteThresholdNum" value="10" style="width:42px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
+  </div>
+  <div class="group">
+    <span class="label" title="문턱값: 높을수록 어두운 경계 픽셀도 투명화 대상에 포함">문턱값</span>
+    <input type="range" id="boundaryStrength" min="0" max="200" value="100">
+    <input type="number" id="strengthNum" value="100" style="width:48px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
+  </div>
+  <div class="group">
+    <span class="label" title="감마: 높을수록 투명화 곡선이 가팔라짐 (1.0=선형)">감마</span>
+    <input type="range" id="boundaryGamma" min="10" max="200" value="100">
+    <input type="number" id="gammaNum" value="3.3" step="0.1" style="width:48px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
   </div>
   <div class="group">
     <span class="label" title="투명 영역에서 안쪽으로 추가 명도 투명화할 픽셀 수">경계 확장</span>
-    <input type="number" id="boundaryDepth" min="0" max="50" value="1" style="width:42px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
+    <input type="number" id="boundaryDepth" min="0" max="50" value="0" style="width:42px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
     <span class="label">px</span>
   </div>
   <div class="group" id="bgColorGroup">
@@ -258,8 +268,12 @@ const saveResultBtn = $('#saveResultBtn');
 const promoteBtn = $('#promoteBtn');
 const statusText = $('#statusText');
 
+const whiteThresholdSlider = $('#whiteThreshold');
+const whiteThresholdNum = $('#whiteThresholdNum');
 const strengthSlider = $('#boundaryStrength');
-const strengthLabel = $('#strengthLabel');
+const strengthNum = $('#strengthNum');
+const gammaSlider = $('#boundaryGamma');
+const gammaNum = $('#gammaNum');
 const depthInput = $('#boundaryDepth');
 const cursorOverlay = $('#cursorOverlay');
 const zoomSlider = $('#zoomSlider');
@@ -728,8 +742,26 @@ brushSizeInput.addEventListener('input', (e) => {
   state.brushSize = parseInt(e.target.value, 10);
   brushSizeLabel.textContent = state.brushSize;
 });
+whiteThresholdSlider.addEventListener('input', (e) => {
+  whiteThresholdNum.value = e.target.value;
+});
+whiteThresholdNum.addEventListener('input', (e) => {
+  const v = parseInt(e.target.value, 10) || 0;
+  whiteThresholdSlider.value = Math.max(0, Math.min(128, v));
+});
 strengthSlider.addEventListener('input', (e) => {
-  strengthLabel.textContent = e.target.value;
+  strengthNum.value = e.target.value;
+});
+strengthNum.addEventListener('input', (e) => {
+  const v = parseInt(e.target.value, 10) || 0;
+  strengthSlider.value = Math.max(0, Math.min(200, v));
+});
+gammaSlider.addEventListener('input', (e) => {
+  gammaNum.value = (parseInt(e.target.value, 10) / 30.0).toFixed(1);
+});
+gammaNum.addEventListener('input', (e) => {
+  const v = parseFloat(e.target.value) || 0;
+  gammaSlider.value = Math.max(10, Math.min(200, Math.round(v * 30)));
 });
 
 // ============================================================
@@ -753,7 +785,9 @@ async function runAlgorithm() {
       body: JSON.stringify({
         image: imageDataUrl,
         mask: maskDataUrl,
-        boundary_strength: parseInt(strengthSlider.value, 10),
+        white_threshold: parseInt(whiteThresholdNum.value, 10) || 10,
+        boundary_strength: parseInt(strengthNum.value, 10) || 100,
+        boundary_gamma: Math.round((parseFloat(gammaNum.value) || 3.3) * 30),
         boundary_depth: parseInt(depthInput.value, 10) || 1,
       }),
     });

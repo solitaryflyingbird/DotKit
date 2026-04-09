@@ -198,16 +198,25 @@ def expand_boundary(boundary: np.ndarray, bg_mask: np.ndarray, depth: int = 1) -
 def apply_boundary_alpha(
     pixels: np.ndarray,
     boundary_mask: np.ndarray,
-    strength: int = 60,
+    strength: int = 100,
+    gamma_raw: int = 100,
 ) -> np.ndarray:
     """경계면 픽셀에 명도 기반 알파를 적용한다.
 
-    흰색에 가까울수록 투명. gamma 커브로 강도를 조절한다.
-    strength가 높을수록 밝은 경계 픽셀도 공격적으로 투명화하고,
-    기존 투명도도 더 깊어진다.
+    strength — 문턱값 제어 (0~200). 이 밝기 이상인 픽셀만 투명화 대상.
+      threshold = 1.0 - strength / 100
+      strength=0   → threshold=1.0 (투명화 거의 없음)
+      strength=100 → threshold=0.0 (기본, 모든 경계 픽셀 대상)
+      strength=200 → threshold=-1.0 (전환 구간까지 무시, 완전 적용)
 
-    gamma = strength / 30  (strength=30이면 선형, 60이면 제곱)
+    gamma_raw — 알파 곡선 제어.
+      gamma = gamma_raw / 30
+      gamma_raw=30  → gamma=1.0 (선형)
+      gamma_raw=100 → gamma=3.3 (기본, 공격적)
+      gamma_raw=200 → gamma=6.7 (매우 공격적)
+
     alpha = (1 - brightness) ^ gamma * 255
+    문턱값 미만은 원본 알파 유지, 문턱값~문턱값+0.1 구간은 부드러운 전환.
     """
     result = pixels.copy()
     ys, xs = np.where(boundary_mask)
@@ -219,13 +228,13 @@ def apply_boundary_alpha(
     b = result[ys, xs, 2].astype(float)
 
     brightness = (r + g + b) / (3.0 * 255.0)
-    gamma = max(strength, 1) / 30.0
-    alpha = (np.power(1.0 - brightness, gamma) * 255.0).clip(0, 255).astype(np.uint8)
+    threshold = 1.0 - strength / 100.0
+    gamma = max(gamma_raw, 1) / 30.0
+    alpha = (np.power(1.0 - brightness, gamma) * 255.0).clip(0, 255)
 
-    # 밝기가 0.5 미만인 픽셀은 오브젝트 자체 색 → 알파 유지 (투명화 하지 않음)
-    # 밝기 0.5~0.6 구간은 부드럽게 전환
-    blend = np.clip((brightness - 0.5) / 0.1, 0.0, 1.0)
-    original_alpha = result[ys, xs, 3]
+    # 문턱값 미만 → 원본 알파 유지, 문턱값~문턱값+0.1 → 부드러운 전환
+    blend = np.clip((brightness - threshold) / 0.1, 0.0, 1.0)
+    original_alpha = result[ys, xs, 3].astype(float)
     result[ys, xs, 3] = (original_alpha * (1 - blend) + alpha * blend).clip(0, 255).astype(np.uint8)
     return result
 
@@ -238,8 +247,9 @@ def run_pipeline(
     pixels: np.ndarray,
     mask_pixels=None,
     threshold: int = 10,
-    boundary_depth: int = 1,
-    boundary_strength: int = 60,
+    boundary_depth: int = 0,
+    boundary_strength: int = 100,
+    boundary_gamma: int = 100,
 ) -> np.ndarray:
     """numpy 배열만 다루는 알고리즘 핵심.
 
@@ -257,7 +267,7 @@ def run_pipeline(
     result = remove_background(pixels, bg_mask)
     boundary = find_boundary(bg_mask)
     expanded = expand_boundary(boundary, bg_mask, depth=boundary_depth)
-    result = apply_boundary_alpha(result, expanded, strength=boundary_strength)
+    result = apply_boundary_alpha(result, expanded, strength=boundary_strength, gamma_raw=boundary_gamma)
     return result
 
 
@@ -265,7 +275,7 @@ def clean_cut(
     input_path: str,
     output_path: str,
     threshold: int = 10,
-    boundary_depth: int = 1,
+    boundary_depth: int = 0,
     mask_path=None,
 ) -> None:
     """파일 기반 진입점."""
@@ -290,8 +300,10 @@ def clean_cut(
 def _process_bytes(
     image_bytes: bytes,
     mask_bytes,
-    boundary_strength: int = 60,
-    boundary_depth: int = 1,
+    white_threshold: int = 10,
+    boundary_strength: int = 100,
+    boundary_gamma: int = 100,
+    boundary_depth: int = 0,
 ) -> bytes:
     """HTTP 요청 처리 — 바이트 IO 후 run_pipeline 호출."""
     img = Image.open(BytesIO(image_bytes)).convert("RGBA")
@@ -304,7 +316,7 @@ def _process_bytes(
             mask_img = mask_img.resize(img.size)
         mask_px = np.array(mask_img)
 
-    result = run_pipeline(px, mask_pixels=mask_px, boundary_strength=boundary_strength, boundary_depth=boundary_depth)
+    result = run_pipeline(px, mask_pixels=mask_px, threshold=white_threshold, boundary_strength=boundary_strength, boundary_gamma=boundary_gamma, boundary_depth=boundary_depth)
 
     out = BytesIO()
     Image.fromarray(result).save(out, format="PNG")
@@ -353,10 +365,12 @@ def serve(port: int = 8765) -> None:
                     raise ValueError("image 필드 없음")
                 image_bytes = base64.b64decode(image_b64)
                 mask_bytes = base64.b64decode(mask_b64) if mask_b64 else None
-                strength = int(data.get("boundary_strength", 60))
-                depth = int(data.get("boundary_depth", 1))
+                white_thresh = int(data.get("white_threshold", 10))
+                strength = int(data.get("boundary_strength", 100))
+                gamma = int(data.get("boundary_gamma", 100))
+                depth = int(data.get("boundary_depth", 0))
 
-                result_bytes = _process_bytes(image_bytes, mask_bytes, boundary_strength=strength, boundary_depth=depth)
+                result_bytes = _process_bytes(image_bytes, mask_bytes, white_threshold=white_thresh, boundary_strength=strength, boundary_gamma=gamma, boundary_depth=depth)
             except Exception as e:
                 err_msg = f"{type(e).__name__}: {e}"
                 self.send_response(500)
