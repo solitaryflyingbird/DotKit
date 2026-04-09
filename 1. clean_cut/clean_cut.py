@@ -198,38 +198,29 @@ def expand_boundary(boundary: np.ndarray, bg_mask: np.ndarray, depth: int = 1) -
 def apply_boundary_alpha(
     pixels: np.ndarray,
     boundary_mask: np.ndarray,
-    saturation_threshold: float = 0.15,
-    black_protect_brightness: float = 0.3,
+    strength: int = 60,
 ) -> np.ndarray:
-    """경계면 픽셀에 명도 + 채도 기반 알파를 적용한다.
+    """경계면 픽셀에 명도 기반 알파를 적용한다.
 
-    - 명도 기준: 흰색에 가까울수록 투명. alpha = (1 - 명도) * 255
-    - 채도 기준: chroma가 saturation_threshold 이하인 픽셀(=회색기)도
-      추가 투명화. chroma=0일 때 완전 투명, chroma=threshold면 무영향.
-    - 검정 보호: 명도가 black_protect_brightness 미만이면 채도 규칙
-      적용하지 않음 (검정/짙은 회색이 같이 투명해지는 것 방지).
+    흰색에 가까울수록 투명. gamma 커브로 강도를 조절한다.
+    strength가 높을수록 밝은 경계 픽셀도 공격적으로 투명화하고,
+    기존 투명도도 더 깊어진다.
 
-    최종 알파 = min(명도_알파, 채도_알파).
+    gamma = strength / 30  (strength=30이면 선형, 60이면 제곱)
+    alpha = (1 - brightness) ^ gamma * 255
     """
     result = pixels.copy()
     ys, xs = np.where(boundary_mask)
+    if len(ys) == 0:
+        return result
 
     r = result[ys, xs, 0].astype(float)
     g = result[ys, xs, 1].astype(float)
     b = result[ys, xs, 2].astype(float)
 
     brightness = (r + g + b) / (3.0 * 255.0)
-    max_c = np.maximum(np.maximum(r, g), b)
-    min_c = np.minimum(np.minimum(r, g), b)
-    chroma = (max_c - min_c) / 255.0
-
-    brightness_alpha = (1.0 - brightness) * 255.0
-    saturation_alpha = np.clip(chroma / max(saturation_threshold, 1e-6), 0.0, 1.0) * 255.0
-    saturation_alpha = np.where(
-        brightness < black_protect_brightness, 255.0, saturation_alpha
-    )
-
-    alpha = np.minimum(brightness_alpha, saturation_alpha).clip(0, 255).astype(np.uint8)
+    gamma = max(strength, 1) / 30.0
+    alpha = (np.power(1.0 - brightness, gamma) * 255.0).clip(0, 255).astype(np.uint8)
     result[ys, xs, 3] = alpha
     return result
 
@@ -243,8 +234,7 @@ def run_pipeline(
     mask_pixels=None,
     threshold: int = 10,
     boundary_depth: int = 1,
-    saturation_threshold: float = 0.15,
-    black_protect_brightness: float = 0.3,
+    boundary_strength: int = 60,
 ) -> np.ndarray:
     """numpy 배열만 다루는 알고리즘 핵심.
 
@@ -262,12 +252,7 @@ def run_pipeline(
     result = remove_background(pixels, bg_mask)
     boundary = find_boundary(bg_mask)
     expanded = expand_boundary(boundary, bg_mask, depth=boundary_depth)
-    result = apply_boundary_alpha(
-        result,
-        expanded,
-        saturation_threshold=saturation_threshold,
-        black_protect_brightness=black_protect_brightness,
-    )
+    result = apply_boundary_alpha(result, expanded, strength=boundary_strength)
     return result
 
 
@@ -300,8 +285,7 @@ def clean_cut(
 def _process_bytes(
     image_bytes: bytes,
     mask_bytes,
-    saturation_threshold: float = 0.15,
-    black_protect_brightness: float = 0.3,
+    boundary_strength: int = 60,
 ) -> bytes:
     """HTTP 요청 처리 — 바이트 IO 후 run_pipeline 호출."""
     img = Image.open(BytesIO(image_bytes)).convert("RGBA")
@@ -314,12 +298,7 @@ def _process_bytes(
             mask_img = mask_img.resize(img.size)
         mask_px = np.array(mask_img)
 
-    result = run_pipeline(
-        px,
-        mask_pixels=mask_px,
-        saturation_threshold=saturation_threshold,
-        black_protect_brightness=black_protect_brightness,
-    )
+    result = run_pipeline(px, mask_pixels=mask_px, boundary_strength=boundary_strength)
 
     out = BytesIO()
     Image.fromarray(result).save(out, format="PNG")
@@ -368,15 +347,9 @@ def serve(port: int = 8765) -> None:
                     raise ValueError("image 필드 없음")
                 image_bytes = base64.b64decode(image_b64)
                 mask_bytes = base64.b64decode(mask_b64) if mask_b64 else None
-                sat_threshold = float(data.get("saturation_threshold", 0.15))
-                black_protect = float(data.get("black_protect_brightness", 0.3))
+                strength = int(data.get("boundary_strength", 60))
 
-                result_bytes = _process_bytes(
-                    image_bytes,
-                    mask_bytes,
-                    saturation_threshold=sat_threshold,
-                    black_protect_brightness=black_protect,
-                )
+                result_bytes = _process_bytes(image_bytes, mask_bytes, boundary_strength=strength)
             except Exception as e:
                 err_msg = f"{type(e).__name__}: {e}"
                 self.send_response(500)

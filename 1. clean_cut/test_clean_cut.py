@@ -134,37 +134,46 @@ def test_boundary_alpha_white_pixel():
 
 
 def test_boundary_alpha_midgray_pixel():
-    """중간 회색(128,128,128) → 채도=0, 명도=0.5(검정보호 이상) → 채도 규칙으로 완전 투명"""
+    """중간 회색(128,128,128) → 기본 strength=60(gamma=2) → 알파 ≈ 63"""
     pixels = np.array([[[128, 128, 128, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
-    assert result[0, 0, 3] == 0
+    # (1 - 128/255)^2 * 255 ≈ 63
+    assert 61 <= result[0, 0, 3] <= 65
 
 
-def test_boundary_alpha_dark_gray_protected():
-    """짙은 회색(40,40,40) → 명도≈0.157 < 검정보호(0.3) → 채도 규칙 무시, 명도 알파만"""
+def test_boundary_alpha_dark_pixel():
+    """짙은 회색(40,40,40) → gamma=2 → 알파 ≈ 181"""
     pixels = np.array([[[40, 40, 40, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
-    # brightness_alpha = (1 - 40/255) * 255 ≈ 215
-    assert 213 <= result[0, 0, 3] <= 217
+    # (1 - 40/255)^2 * 255 ≈ 181
+    assert 179 <= result[0, 0, 3] <= 183
 
 
 def test_boundary_alpha_saturated_pixel():
-    """선명한 파랑(50,50,200) → chroma≈0.59 > threshold(0.15) → 채도 규칙 무영향, 명도 알파만"""
+    """선명한 파랑(50,50,200) → gamma=2 → 알파 ≈ 94"""
     pixels = np.array([[[50, 50, 200, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
-    # brightness ≈ 100/255 ≈ 0.392, brightness_alpha ≈ 155
-    assert 153 <= result[0, 0, 3] <= 157
+    # brightness ≈ 0.392, (1-0.392)^2 * 255 ≈ 94
+    assert 92 <= result[0, 0, 3] <= 96
 
 
 def test_boundary_alpha_black_pixel():
-    """검정(0,0,0) 경계 픽셀 → 명도=0이라 검정보호 발동, 알파 = 255"""
+    """검정(0,0,0) → 명도=0 → 알파 = 255"""
     pixels = np.array([[[0, 0, 0, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
     assert result[0, 0, 3] == 255
+
+
+def test_boundary_alpha_linear_strength():
+    """strength=30(gamma=1)이면 선형: 중간 회색 알파 ≈ 127"""
+    pixels = np.array([[[128, 128, 128, 255]]], dtype=np.uint8)
+    mask = np.array([[True]])
+    result = apply_boundary_alpha(pixels, mask, strength=30)
+    assert 125 <= result[0, 0, 3] <= 129
 
 
 # ── 통합 테스트 ──

@@ -166,14 +166,9 @@ body { display: flex; flex-direction: column; overflow: hidden; }
     <button id="undoBtn">실행취소</button>
   </div>
   <div class="group">
-    <span class="label" title="채도가 이 값 이하인 픽셀을 '회색기'로 보고 추가 투명화">채도</span>
-    <input type="range" id="saturationThreshold" min="0" max="100" value="15">
-    <span id="saturationLabel">0.15</span>
-  </div>
-  <div class="group">
-    <span class="label" title="명도가 이 값 미만인 픽셀은 채도 규칙 무시 (검정 보호)">검정보호</span>
-    <input type="range" id="brightnessThreshold" min="0" max="100" value="30">
-    <span id="brightnessLabel">0.30</span>
+    <span class="label" title="높을수록 밝은 경계 픽셀도 투명화, 기존 투명도도 강화">명도 강도</span>
+    <input type="range" id="boundaryStrength" min="0" max="100" value="60">
+    <span id="strengthLabel">60</span>
   </div>
   <div class="group" id="bgColorGroup">
     <span class="label">배경</span>
@@ -245,10 +240,6 @@ const brushSizeLabel = $('#brushSizeLabel');
 const undoBtn = $('#undoBtn');
 const runBtn = $('#runBtn');
 const customColorInput = $('#customColor');
-const saturationSlider = $('#saturationThreshold');
-const saturationLabel = $('#saturationLabel');
-const brightnessSlider = $('#brightnessThreshold');
-const brightnessLabel = $('#brightnessLabel');
 const workArea = $('#workArea');
 const canvasContainer = $('#canvasContainer');
 const imageCanvas = $('#imageCanvas');
@@ -259,6 +250,8 @@ const saveResultBtn = $('#saveResultBtn');
 const promoteBtn = $('#promoteBtn');
 const statusText = $('#statusText');
 
+const strengthSlider = $('#boundaryStrength');
+const strengthLabel = $('#strengthLabel');
 const cursorOverlay = $('#cursorOverlay');
 const zoomSlider = $('#zoomSlider');
 const zoomLabel = $('#zoomLabel');
@@ -715,11 +708,8 @@ brushSizeInput.addEventListener('input', (e) => {
   state.brushSize = parseInt(e.target.value, 10);
   brushSizeLabel.textContent = state.brushSize;
 });
-saturationSlider.addEventListener('input', (e) => {
-  saturationLabel.textContent = (parseInt(e.target.value, 10) / 100).toFixed(2);
-});
-brightnessSlider.addEventListener('input', (e) => {
-  brightnessLabel.textContent = (parseInt(e.target.value, 10) / 100).toFixed(2);
+strengthSlider.addEventListener('input', (e) => {
+  strengthLabel.textContent = e.target.value;
 });
 
 // ============================================================
@@ -743,8 +733,7 @@ async function runAlgorithm() {
       body: JSON.stringify({
         image: imageDataUrl,
         mask: maskDataUrl,
-        saturation_threshold: parseInt(saturationSlider.value, 10) / 100,
-        black_protect_brightness: parseInt(brightnessSlider.value, 10) / 100,
+        boundary_strength: parseInt(strengthSlider.value, 10),
       }),
     });
     if (!res.ok) {
