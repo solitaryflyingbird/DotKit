@@ -286,6 +286,7 @@ def _process_bytes(
     image_bytes: bytes,
     mask_bytes,
     boundary_strength: int = 60,
+    boundary_depth: int = 1,
 ) -> bytes:
     """HTTP 요청 처리 — 바이트 IO 후 run_pipeline 호출."""
     img = Image.open(BytesIO(image_bytes)).convert("RGBA")
@@ -298,7 +299,7 @@ def _process_bytes(
             mask_img = mask_img.resize(img.size)
         mask_px = np.array(mask_img)
 
-    result = run_pipeline(px, mask_pixels=mask_px, boundary_strength=boundary_strength)
+    result = run_pipeline(px, mask_pixels=mask_px, boundary_strength=boundary_strength, boundary_depth=boundary_depth)
 
     out = BytesIO()
     Image.fromarray(result).save(out, format="PNG")
@@ -348,8 +349,9 @@ def serve(port: int = 8765) -> None:
                 image_bytes = base64.b64decode(image_b64)
                 mask_bytes = base64.b64decode(mask_b64) if mask_b64 else None
                 strength = int(data.get("boundary_strength", 60))
+                depth = int(data.get("boundary_depth", 1))
 
-                result_bytes = _process_bytes(image_bytes, mask_bytes, boundary_strength=strength)
+                result_bytes = _process_bytes(image_bytes, mask_bytes, boundary_strength=strength, boundary_depth=depth)
             except Exception as e:
                 err_msg = f"{type(e).__name__}: {e}"
                 self.send_response(500)

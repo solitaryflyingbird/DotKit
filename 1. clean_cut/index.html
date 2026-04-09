@@ -170,12 +170,14 @@ body { display: flex; flex-direction: column; overflow: hidden; }
     <input type="range" id="boundaryStrength" min="0" max="100" value="60">
     <span id="strengthLabel">60</span>
   </div>
+  <div class="group">
+    <span class="label" title="투명 영역에서 안쪽으로 추가 명도 투명화할 픽셀 수">경계 확장</span>
+    <input type="number" id="boundaryDepth" min="0" max="50" value="1" style="width:42px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
+    <span class="label">px</span>
+  </div>
   <div class="group" id="bgColorGroup">
     <span class="label">배경</span>
     <div class="bg-swatch bg-swatch-checker active" data-bg="checker" title="체커보드"></div>
-    <div class="bg-swatch" data-bg="#ffffff" style="background:#ffffff" title="흰색"></div>
-    <div class="bg-swatch" data-bg="#000000" style="background:#000000" title="검정"></div>
-    <div class="bg-swatch" data-bg="#ff00ff" style="background:#ff00ff" title="마젠타"></div>
     <input type="color" id="customBgColor" value="#808080" title="커스텀 배경색" style="width:24px;height:22px;border:1px solid #444;border-radius:3px;padding:0;cursor:pointer;">
   </div>
   <div class="group">
@@ -252,6 +254,7 @@ const statusText = $('#statusText');
 
 const strengthSlider = $('#boundaryStrength');
 const strengthLabel = $('#strengthLabel');
+const depthInput = $('#boundaryDepth');
 const cursorOverlay = $('#cursorOverlay');
 const zoomSlider = $('#zoomSlider');
 const zoomLabel = $('#zoomLabel');
@@ -734,6 +737,7 @@ async function runAlgorithm() {
         image: imageDataUrl,
         mask: maskDataUrl,
         boundary_strength: parseInt(strengthSlider.value, 10),
+        boundary_depth: parseInt(depthInput.value, 10) || 1,
       }),
     });
     if (!res.ok) {
