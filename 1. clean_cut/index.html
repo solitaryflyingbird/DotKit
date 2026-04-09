@@ -240,8 +240,6 @@ const state = {
 // ============================================================
 const $ = (sel) => document.querySelector(sel);
 const fileInput = $('#fileInput');
-const brushSizeInput = $('#brushSize');
-const brushSizeLabel = $('#brushSizeLabel');
 const undoBtn = $('#undoBtn');
 const runBtn = $('#runBtn');
 const runConfinedBtn = $('#runConfinedBtn');
@@ -431,13 +429,7 @@ customBgColor.addEventListener('input', (e) => {
 
 workArea.addEventListener('wheel', (e) => {
   e.preventDefault();
-  if (e.altKey) {
-    // 브러시 크기
-    const d = e.deltaY > 0 ? -2 : 2;
-    state.brushSize = Math.max(1, Math.min(200, state.brushSize + d));
-    brushSizeInput.value = state.brushSize;
-    brushSizeLabel.textContent = state.brushSize;
-  } else {
+  {
     // 줌 (커서 위치 고정)
     const rect = workArea.getBoundingClientRect();
     const cx = e.clientX - rect.left;
@@ -736,10 +728,6 @@ customColorInput.addEventListener('input', (e) => {
   const b = parseInt(hex.slice(5, 7), 16);
   state.color = `rgb(${r},${g},${b})`;
   document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
-});
-brushSizeInput.addEventListener('input', (e) => {
-  state.brushSize = parseInt(e.target.value, 10);
-  brushSizeLabel.textContent = state.brushSize;
 });
 whiteThresholdSlider.addEventListener('input', (e) => {
   whiteThresholdNum.value = e.target.value;
