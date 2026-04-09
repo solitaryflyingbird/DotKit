@@ -623,7 +623,7 @@ function redrawLassoPreview(hoverPoint) {
   const dpr = window.devicePixelRatio || 1;
   lassoCtx.clearRect(0, 0, w / dpr, h / dpr);
   if (state.lassoPoints.length === 0) return;
-  const col = state.tool === 'lasso-eraser' ? 'rgb(255,80,80)' : state.color;
+  const col = state.color;
   const pts = state.lassoPoints.map(imageToScreen);
   const hover = hoverPoint ? imageToScreen(hoverPoint) : null;
   lassoCtx.save();
@@ -716,12 +716,6 @@ document.querySelectorAll('[data-tool]').forEach(b => {
     b.classList.add('active');
     state.tool = b.dataset.tool;
     const isLassoType = state.tool === 'lasso' || state.tool === 'lasso-eraser';
-    if (state.tool === 'lasso') {
-      state.color = 'rgb(60,120,255)';
-      document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
-      const blueSwatch = document.querySelector('.swatch[data-color="rgb(60,120,255)"]');
-      if (blueSwatch) blueSwatch.classList.add('active');
-    }
     if (!isLassoType && state.lassoPoints.length > 0) {
       state.lassoPoints = [];
       redrawLassoPreview();
