@@ -156,11 +156,8 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   </div>
   <div class="group">
     <span class="label">색</span>
-    <div class="swatch active" data-color="rgb(255,60,60)" style="background:rgb(255,60,60)"></div>
-    <div class="swatch" data-color="rgb(60,120,255)" style="background:rgb(60,120,255)"></div>
-    <div class="swatch" data-color="rgb(255,220,60)" style="background:rgb(255,220,60)"></div>
-    <div class="swatch" data-color="rgb(60,220,80)" style="background:rgb(60,220,80)"></div>
-    <input type="color" id="customColor" value="#ff00ff" title="커스텀 색">
+    <div class="swatch active" data-color="rgb(60,120,255)" style="background:rgb(60,120,255)"></div>
+    <input type="color" id="customColor" value="#3c78ff" title="커스텀 색">
   </div>
   <div class="group">
     <button id="undoBtn">실행취소</button>
@@ -174,6 +171,11 @@ body { display: flex; flex-direction: column; overflow: hidden; }
     <span class="label">배경</span>
     <div class="bg-swatch bg-swatch-checker active" data-bg="checker" title="체커보드"></div>
     <input type="color" id="customBgColor" value="#808080" title="커스텀 배경색" style="width:24px;height:22px;border:1px solid #444;border-radius:3px;padding:0;cursor:pointer;">
+  </div>
+  <div class="group">
+    <label style="cursor:pointer;display:flex;align-items:center;gap:4px;" title="체크 시 배경 영역에 명도 비례 투명화 (하드컷 대신 그라데이션)">
+      <input type="checkbox" id="softRemoval"> <span class="label">부드러운 제거</span>
+    </label>
   </div>
   <div class="group">
     <button id="runBtn">알고리즘 실행 ▶</button>
@@ -219,7 +221,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 const state = {
   tool: 'lasso',
   brushSize: 20,
-  color: 'rgb(255,60,60)',
+  color: 'rgb(60,120,255)',
   view: { scale: 1, panX: 0, panY: 0 },
   strokes: [],          // undo 히스토리
   imageLoaded: false,
@@ -236,6 +238,7 @@ const state = {
 const $ = (sel) => document.querySelector(sel);
 const fileInput = $('#fileInput');
 const undoBtn = $('#undoBtn');
+const softRemovalCheckbox = $('#softRemoval');
 const runBtn = $('#runBtn');
 const runConfinedBtn = $('#runConfinedBtn');
 const customColorInput = $('#customColor');
@@ -758,6 +761,7 @@ async function runAlgorithm(confined = false) {
         boundary_gamma: 100,
         boundary_depth: 0,
         confined: confined,
+        soft: softRemovalCheckbox.checked,
       }),
     });
     if (!res.ok) {

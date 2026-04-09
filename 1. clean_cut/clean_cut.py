@@ -161,10 +161,24 @@ def mark_background_from_mask(
 # 배경 제거 + 경계면 알파
 # ============================================================
 
-def remove_background(pixels: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """배경으로 마킹된 픽셀의 알파를 0으로 설정한다."""
+def remove_background(pixels: np.ndarray, mask: np.ndarray, soft: bool = False) -> np.ndarray:
+    """배경으로 마킹된 픽셀의 알파를 설정한다.
+
+    soft=False: 하드컷 (alpha=0)
+    soft=True:  명도 비례 graduated alpha.
+                흰색에 가까울수록 alpha≈0, 어두울수록 alpha 높음.
+    """
     result = pixels.copy()
-    result[mask, 3] = 0
+    if not soft:
+        result[mask, 3] = 0
+    else:
+        ys, xs = np.where(mask)
+        r = result[ys, xs, 0].astype(float)
+        g = result[ys, xs, 1].astype(float)
+        b = result[ys, xs, 2].astype(float)
+        brightness = (r + g + b) / (3.0 * 255.0)
+        alpha = ((1.0 - brightness) * 255.0).clip(0, 255).astype(np.uint8)
+        result[ys, xs, 3] = alpha
     return result
 
 
@@ -263,6 +277,7 @@ def run_pipeline(
     boundary_strength: int = 100,
     boundary_gamma: int = 100,
     confined: bool = False,
+    soft: bool = False,
 ) -> np.ndarray:
     """numpy 배열만 다루는 알고리즘 핵심.
 
@@ -285,7 +300,7 @@ def run_pipeline(
                 roi = mask_alpha > 10
             else:
                 roi = mask_pixels[..., :3].max(axis=2) <= 10
-    result = remove_background(pixels, bg_mask)
+    result = remove_background(pixels, bg_mask, soft=soft)
     boundary = find_boundary(bg_mask)
     if roi is not None:
         boundary &= roi
@@ -330,6 +345,7 @@ def _process_bytes(
     boundary_gamma: int = 100,
     boundary_depth: int = 0,
     confined: bool = False,
+    soft: bool = False,
 ) -> bytes:
     """HTTP 요청 처리 — 바이트 IO 후 run_pipeline 호출."""
     img = Image.open(BytesIO(image_bytes)).convert("RGBA")
@@ -342,7 +358,7 @@ def _process_bytes(
             mask_img = mask_img.resize(img.size)
         mask_px = np.array(mask_img)
 
-    result = run_pipeline(px, mask_pixels=mask_px, threshold=white_threshold, boundary_strength=boundary_strength, boundary_gamma=boundary_gamma, boundary_depth=boundary_depth, confined=confined)
+    result = run_pipeline(px, mask_pixels=mask_px, threshold=white_threshold, boundary_strength=boundary_strength, boundary_gamma=boundary_gamma, boundary_depth=boundary_depth, confined=confined, soft=soft)
 
     # 알파=0 픽셀의 RGB를 (0,0,0)으로 정리 — premultiplied alpha 호환
     transparent = result[:, :, 3] == 0
@@ -400,8 +416,9 @@ def serve(port: int = 8765) -> None:
                 gamma = int(data.get("boundary_gamma", 100))
                 depth = int(data.get("boundary_depth", 0))
                 is_confined = bool(data.get("confined", False))
+                is_soft = bool(data.get("soft", False))
 
-                result_bytes = _process_bytes(image_bytes, mask_bytes, white_threshold=white_thresh, boundary_strength=strength, boundary_gamma=gamma, boundary_depth=depth, confined=is_confined)
+                result_bytes = _process_bytes(image_bytes, mask_bytes, white_threshold=white_thresh, boundary_strength=strength, boundary_gamma=gamma, boundary_depth=depth, confined=is_confined, soft=is_soft)
             except Exception as e:
                 err_msg = f"{type(e).__name__}: {e}"
                 self.send_response(500)
