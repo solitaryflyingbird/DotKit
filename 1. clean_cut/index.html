@@ -151,15 +151,8 @@ body { display: flex; flex-direction: column; overflow: hidden; }
     <input type="file" id="fileInput" accept="image/*">
   </div>
   <div class="group">
-    <button data-tool="pen" class="active">펜</button>
-    <button data-tool="eraser">지우개</button>
-    <button data-tool="lasso">올가미</button>
+    <button data-tool="lasso" class="active">올가미</button>
     <button data-tool="lasso-eraser">올가미 지우개</button>
-  </div>
-  <div class="group">
-    <span class="label">크기</span>
-    <input type="range" id="brushSize" min="1" max="200" value="20">
-    <span id="brushSizeLabel">20</span>
   </div>
   <div class="group">
     <span class="label">색</span>
@@ -191,7 +184,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
     <button id="runBtn">알고리즘 실행 ▶</button>
     <button id="runConfinedBtn" style="background:#2a5a7a;border-color:#3a6a8a;color:#fff;">영역만 실행 ▶</button>
   </div>
-  <span class="hint">휠=줌 · Alt+휠=브러시 크기 · 스페이스+드래그=팬 · ⌘Z=실행취소 · 더블클릭/Enter=올가미 닫기</span>
+  <span class="hint">휠=줌 · 스페이스+드래그=팬 · ⌘Z=실행취소 · 더블클릭/Enter=올가미 닫기</span>
 </div>
 
 <div id="workspace">
@@ -229,7 +222,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 // 상태
 // ============================================================
 const state = {
-  tool: 'pen',
+  tool: 'lasso',
   brushSize: 20,
   color: 'rgb(255,60,60)',
   view: { scale: 1, panX: 0, panY: 0 },
@@ -374,14 +367,7 @@ function updateCursor(clientX, clientY) {
   cursorOverlay.style.display = 'block';
   cursorOverlay.style.left = left + 'px';
   cursorOverlay.style.top = top + 'px';
-  if (state.tool === 'lasso' || state.tool === 'lasso-eraser') {
-    cursorOverlay.classList.add('lasso-cursor');
-  } else {
-    cursorOverlay.classList.remove('lasso-cursor');
-    const size = state.brushSize * state.view.scale;
-    cursorOverlay.style.width = size + 'px';
-    cursorOverlay.style.height = size + 'px';
-  }
+  cursorOverlay.classList.add('lasso-cursor');
 }
 workArea.addEventListener('mouseleave', () => {
   cursorOverlay.style.display = 'none';
@@ -520,16 +506,7 @@ workArea.addEventListener('mousedown', (e) => {
 
   const p = screenToImage(e.clientX, e.clientY);
 
-  if (state.tool === 'pen' || state.tool === 'eraser') {
-    state.drawing = true;
-    currentStroke = {
-      type: state.tool,
-      color: state.color,
-      size: state.brushSize,
-      points: [p],
-    };
-    drawStrokeIncremental(currentStroke, p, true);
-  } else if (state.tool === 'lasso' || state.tool === 'lasso-eraser') {
+  if (state.tool === 'lasso' || state.tool === 'lasso-eraser') {
     state.lassoPoints.push(p);
     redrawLassoPreview();
   }
@@ -543,12 +520,6 @@ workArea.addEventListener('mousemove', (e) => {
     applyView();
     return;
   }
-  if (state.drawing && currentStroke) {
-    const p = screenToImage(e.clientX, e.clientY);
-    currentStroke.points.push(p);
-    drawStrokeIncremental(currentStroke, p, false);
-    return;
-  }
   if ((state.tool === 'lasso' || state.tool === 'lasso-eraser') && state.lassoPoints.length > 0) {
     const p = screenToImage(e.clientX, e.clientY);
     redrawLassoPreview(p);
@@ -560,11 +531,6 @@ window.addEventListener('mouseup', (e) => {
     state.panStart = null;
     workArea.classList.remove('dragging');
     return;
-  }
-  if (state.drawing && currentStroke) {
-    state.strokes.push(currentStroke);
-    state.drawing = false;
-    currentStroke = null;
   }
 });
 
