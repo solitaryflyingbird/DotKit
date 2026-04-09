@@ -221,7 +221,12 @@ def apply_boundary_alpha(
     brightness = (r + g + b) / (3.0 * 255.0)
     gamma = max(strength, 1) / 30.0
     alpha = (np.power(1.0 - brightness, gamma) * 255.0).clip(0, 255).astype(np.uint8)
-    result[ys, xs, 3] = alpha
+
+    # 밝기가 0.5 미만인 픽셀은 오브젝트 자체 색 → 알파 유지 (투명화 하지 않음)
+    # 밝기 0.5~0.6 구간은 부드럽게 전환
+    blend = np.clip((brightness - 0.5) / 0.1, 0.0, 1.0)
+    original_alpha = result[ys, xs, 3]
+    result[ys, xs, 3] = (original_alpha * (1 - blend) + alpha * blend).clip(0, 255).astype(np.uint8)
     return result
 
 

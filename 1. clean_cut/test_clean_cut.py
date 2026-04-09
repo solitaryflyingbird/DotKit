@@ -134,30 +134,29 @@ def test_boundary_alpha_white_pixel():
 
 
 def test_boundary_alpha_midgray_pixel():
-    """중간 회색(128,128,128) → 기본 strength=60(gamma=2) → 알파 ≈ 63"""
+    """중간 회색(128,128,128) → brightness=0.502, 0.5~0.6 전환 구간 → 부분 적용"""
     pixels = np.array([[[128, 128, 128, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
-    # (1 - 128/255)^2 * 255 ≈ 63
-    assert 61 <= result[0, 0, 3] <= 65
+    # brightness ≈ 0.502, blend ≈ 0.02 → 거의 원본 유지
+    assert result[0, 0, 3] >= 250
 
 
 def test_boundary_alpha_dark_pixel():
-    """짙은 회색(40,40,40) → gamma=2 → 알파 ≈ 181"""
+    """짙은 회색(40,40,40) → brightness < 0.5 → 알파 255 유지"""
     pixels = np.array([[[40, 40, 40, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
-    # (1 - 40/255)^2 * 255 ≈ 181
-    assert 179 <= result[0, 0, 3] <= 183
+    assert result[0, 0, 3] == 255
 
 
-def test_boundary_alpha_saturated_pixel():
-    """선명한 파랑(50,50,200) → gamma=2 → 알파 ≈ 94"""
-    pixels = np.array([[[50, 50, 200, 255]]], dtype=np.uint8)
+def test_boundary_alpha_bright_boundary():
+    """밝은 경계(230,230,230) → brightness≈0.90 → 투명화 강하게 적용"""
+    pixels = np.array([[[230, 230, 230, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
-    # brightness ≈ 0.392, (1-0.392)^2 * 255 ≈ 94
-    assert 92 <= result[0, 0, 3] <= 96
+    # brightness 0.90, gamma=2: (1-0.9)^2*255 ≈ 2.5, blend=1.0 → 알파 매우 낮음
+    assert result[0, 0, 3] < 10
 
 
 def test_boundary_alpha_black_pixel():
@@ -169,11 +168,12 @@ def test_boundary_alpha_black_pixel():
 
 
 def test_boundary_alpha_linear_strength():
-    """strength=30(gamma=1)이면 선형: 중간 회색 알파 ≈ 127"""
-    pixels = np.array([[[128, 128, 128, 255]]], dtype=np.uint8)
+    """strength=30(gamma=1) + 밝은 픽셀 → 선형 알파 적용"""
+    pixels = np.array([[[210, 210, 210, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask, strength=30)
-    assert 125 <= result[0, 0, 3] <= 129
+    # brightness ≈ 0.824, blend=1.0, gamma=1 → alpha = (1-0.824)*255 ≈ 45
+    assert 43 <= result[0, 0, 3] <= 47
 
 
 # ── 통합 테스트 ──
