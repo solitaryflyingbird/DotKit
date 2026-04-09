@@ -88,10 +88,13 @@ def _flood_from_seed(
     sy: int,
     sx: int,
     threshold: int = 10,
+    roi: np.ndarray = None,
 ) -> None:
     """단일 시작점에서 흰색 인접 영역을 BFS flood-fill하여 visited를 in-place로 갱신.
 
     시작점이 이미 visited이거나 흰색이 아니면 아무 일도 하지 않는다.
+
+    roi가 주어지면 ROI 영역 밖으로는 확장하지 않는다 (영역 제한 모드).
     """
     if visited[sy, sx]:
         return
@@ -106,6 +109,8 @@ def _flood_from_seed(
         for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
             ny, nx = cy + dy, cx + dx
             if 0 <= ny < h and 0 <= nx < w and not visited[ny, nx]:
+                if roi is not None and not roi[ny, nx]:
+                    continue
                 if is_white(pixels[ny, nx, :3], threshold):
                     visited[ny, nx] = True
                     queue.append((ny, nx))
@@ -117,11 +122,15 @@ def mark_background_from_mask(
     mask_pixels: np.ndarray,
     threshold: int = 10,
     mask_threshold: int = 10,
+    confined: bool = False,
 ) -> np.ndarray:
     """마스크 이미지의 ROI 픽셀을 시작점으로 BFS flood-fill을 실행하여 bg_mask를 갱신한다.
 
     visited 배열을 공유하므로 한 번 채운 영역은 다시 탐색하지 않는다.
     이 함수가 유일한 배경 마킹 경로 — 테두리 자동 BFS는 더 이상 사용하지 않는다.
+
+    confined=True이면 BFS가 마스크 ROI 영역 밖으로 확장하지 않는다.
+    머리카락 등 세밀한 영역을 다듬을 때 사용.
 
     마스크 ROI 판정 (자동 인식):
     - HTML 그림판 마스크: 알파>0인 픽셀 (그려진 부분)
@@ -140,9 +149,10 @@ def mark_background_from_mask(
         mask_rgb = mask_pixels[..., :3]
         is_roi = mask_rgb.max(axis=2) <= mask_threshold
 
+    roi_limit = is_roi if confined else None
     ys, xs = np.where(is_roi)
     for y, x in zip(ys, xs):
-        _flood_from_seed(pixels, bg_mask, int(y), int(x), threshold)
+        _flood_from_seed(pixels, bg_mask, int(y), int(x), threshold, roi=roi_limit)
 
     return bg_mask
 
@@ -252,6 +262,7 @@ def run_pipeline(
     boundary_depth: int = 0,
     boundary_strength: int = 100,
     boundary_gamma: int = 100,
+    confined: bool = False,
 ) -> np.ndarray:
     """numpy 배열만 다루는 알고리즘 핵심.
 
@@ -264,7 +275,7 @@ def run_pipeline(
     bg_mask = np.zeros(pixels.shape[:2], dtype=bool)
     if mask_pixels is not None:
         bg_mask = mark_background_from_mask(
-            pixels, bg_mask, mask_pixels, threshold=threshold
+            pixels, bg_mask, mask_pixels, threshold=threshold, confined=confined
         )
     result = remove_background(pixels, bg_mask)
     boundary = find_boundary(bg_mask)
@@ -306,6 +317,7 @@ def _process_bytes(
     boundary_strength: int = 100,
     boundary_gamma: int = 100,
     boundary_depth: int = 0,
+    confined: bool = False,
 ) -> bytes:
     """HTTP 요청 처리 — 바이트 IO 후 run_pipeline 호출."""
     img = Image.open(BytesIO(image_bytes)).convert("RGBA")
@@ -318,7 +330,7 @@ def _process_bytes(
             mask_img = mask_img.resize(img.size)
         mask_px = np.array(mask_img)
 
-    result = run_pipeline(px, mask_pixels=mask_px, threshold=white_threshold, boundary_strength=boundary_strength, boundary_gamma=boundary_gamma, boundary_depth=boundary_depth)
+    result = run_pipeline(px, mask_pixels=mask_px, threshold=white_threshold, boundary_strength=boundary_strength, boundary_gamma=boundary_gamma, boundary_depth=boundary_depth, confined=confined)
 
     # 알파=0 픽셀의 RGB를 (0,0,0)으로 정리 — premultiplied alpha 호환
     transparent = result[:, :, 3] == 0
@@ -375,8 +387,9 @@ def serve(port: int = 8765) -> None:
                 strength = int(data.get("boundary_strength", 100))
                 gamma = int(data.get("boundary_gamma", 100))
                 depth = int(data.get("boundary_depth", 0))
+                is_confined = bool(data.get("confined", False))
 
-                result_bytes = _process_bytes(image_bytes, mask_bytes, white_threshold=white_thresh, boundary_strength=strength, boundary_gamma=gamma, boundary_depth=depth)
+                result_bytes = _process_bytes(image_bytes, mask_bytes, white_threshold=white_thresh, boundary_strength=strength, boundary_gamma=gamma, boundary_depth=depth, confined=is_confined)
             except Exception as e:
                 err_msg = f"{type(e).__name__}: {e}"
                 self.send_response(500)

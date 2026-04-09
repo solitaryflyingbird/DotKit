@@ -39,6 +39,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 #brushSizeLabel { min-width: 26px; text-align: right; color: #aaa; }
 #runBtn { background: #2d7a3e; border-color: #3a8a4e; color: #fff; }
 #runBtn:hover:not(:disabled) { background: #36904a; }
+#runConfinedBtn:hover:not(:disabled) { background: #356a8a; }
 .hint { font-size: 11px; color: #666; margin-left: auto; }
 
 #workspace {
@@ -153,6 +154,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
     <button data-tool="pen" class="active">펜</button>
     <button data-tool="eraser">지우개</button>
     <button data-tool="lasso">올가미</button>
+    <button data-tool="lasso-eraser">올가미 지우개</button>
   </div>
   <div class="group">
     <span class="label">크기</span>
@@ -187,6 +189,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   </div>
   <div class="group">
     <button id="runBtn">알고리즘 실행 ▶</button>
+    <button id="runConfinedBtn" style="background:#2a5a7a;border-color:#3a6a8a;color:#fff;">영역만 실행 ▶</button>
   </div>
   <span class="hint">휠=줌 · Alt+휠=브러시 크기 · 스페이스+드래그=팬 · ⌘Z=실행취소 · 더블클릭/Enter=올가미 닫기</span>
 </div>
@@ -248,6 +251,7 @@ const brushSizeInput = $('#brushSize');
 const brushSizeLabel = $('#brushSizeLabel');
 const undoBtn = $('#undoBtn');
 const runBtn = $('#runBtn');
+const runConfinedBtn = $('#runConfinedBtn');
 const customColorInput = $('#customColor');
 const workArea = $('#workArea');
 const canvasContainer = $('#canvasContainer');
@@ -370,7 +374,7 @@ function updateCursor(clientX, clientY) {
   cursorOverlay.style.display = 'block';
   cursorOverlay.style.left = left + 'px';
   cursorOverlay.style.top = top + 'px';
-  if (state.tool === 'lasso') {
+  if (state.tool === 'lasso' || state.tool === 'lasso-eraser') {
     cursorOverlay.classList.add('lasso-cursor');
   } else {
     cursorOverlay.classList.remove('lasso-cursor');
@@ -473,7 +477,7 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     undo();
   }
-  if (e.key === 'Enter' && state.tool === 'lasso' && state.lassoPoints.length >= 3) {
+  if (e.key === 'Enter' && (state.tool === 'lasso' || state.tool === 'lasso-eraser') && state.lassoPoints.length >= 3) {
     closeLasso();
   }
   if (e.key === 'Escape' && state.lassoPoints.length > 0) {
@@ -525,7 +529,7 @@ workArea.addEventListener('mousedown', (e) => {
       points: [p],
     };
     drawStrokeIncremental(currentStroke, p, true);
-  } else if (state.tool === 'lasso') {
+  } else if (state.tool === 'lasso' || state.tool === 'lasso-eraser') {
     state.lassoPoints.push(p);
     redrawLassoPreview();
   }
@@ -545,7 +549,7 @@ workArea.addEventListener('mousemove', (e) => {
     drawStrokeIncremental(currentStroke, p, false);
     return;
   }
-  if (state.tool === 'lasso' && state.lassoPoints.length > 0) {
+  if ((state.tool === 'lasso' || state.tool === 'lasso-eraser') && state.lassoPoints.length > 0) {
     const p = screenToImage(e.clientX, e.clientY);
     redrawLassoPreview(p);
   }
@@ -565,7 +569,7 @@ window.addEventListener('mouseup', (e) => {
 });
 
 workArea.addEventListener('dblclick', () => {
-  if (state.tool === 'lasso' && state.lassoPoints.length >= 3) closeLasso();
+  if ((state.tool === 'lasso' || state.tool === 'lasso-eraser') && state.lassoPoints.length >= 3) closeLasso();
 });
 
 // ============================================================
@@ -653,7 +657,7 @@ function redrawLassoPreview(hoverPoint) {
   const dpr = window.devicePixelRatio || 1;
   lassoCtx.clearRect(0, 0, w / dpr, h / dpr);
   if (state.lassoPoints.length === 0) return;
-  const col = state.color;
+  const col = state.tool === 'lasso-eraser' ? 'rgb(255,80,80)' : state.color;
   const pts = state.lassoPoints.map(imageToScreen);
   const hover = hoverPoint ? imageToScreen(hoverPoint) : null;
   lassoCtx.save();
@@ -693,9 +697,10 @@ function redrawLassoPreview(hoverPoint) {
 
 function closeLasso() {
   if (state.lassoPoints.length < 3) return;
+  const isEraser = state.tool === 'lasso-eraser';
   const stroke = {
-    type: 'lasso',
-    color: state.color,
+    type: isEraser ? 'lasso-eraser' : 'lasso',
+    color: isEraser ? '' : state.color,
     points: [...state.lassoPoints],
   };
   drawLassoFill(stroke);
@@ -706,8 +711,13 @@ function closeLasso() {
 
 function drawLassoFill(stroke) {
   maskCtx.save();
-  maskCtx.globalCompositeOperation = 'source-over';
-  maskCtx.fillStyle = stroke.color;
+  if (stroke.type === 'lasso-eraser') {
+    maskCtx.globalCompositeOperation = 'destination-out';
+    maskCtx.fillStyle = 'rgba(0,0,0,1)';
+  } else {
+    maskCtx.globalCompositeOperation = 'source-over';
+    maskCtx.fillStyle = stroke.color;
+  }
   maskCtx.beginPath();
   const pts = stroke.points;
   maskCtx.moveTo(pts[0].x, pts[0].y);
@@ -725,7 +735,7 @@ function undo() {
   state.strokes.pop();
   maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
   for (const s of state.strokes) {
-    if (s.type === 'lasso') drawLassoFill(s);
+    if (s.type === 'lasso' || s.type === 'lasso-eraser') drawLassoFill(s);
     else replayStroke(s);
   }
 }
@@ -739,13 +749,14 @@ document.querySelectorAll('[data-tool]').forEach(b => {
     document.querySelectorAll('[data-tool]').forEach(x => x.classList.remove('active'));
     b.classList.add('active');
     state.tool = b.dataset.tool;
+    const isLassoType = state.tool === 'lasso' || state.tool === 'lasso-eraser';
     if (state.tool === 'lasso') {
       state.color = 'rgb(60,120,255)';
       document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
       const blueSwatch = document.querySelector('.swatch[data-color="rgb(60,120,255)"]');
       if (blueSwatch) blueSwatch.classList.add('active');
     }
-    if (state.tool !== 'lasso' && state.lassoPoints.length > 0) {
+    if (!isLassoType && state.lassoPoints.length > 0) {
       state.lassoPoints = [];
       redrawLassoPreview();
     }
@@ -781,13 +792,14 @@ whiteThresholdNum.addEventListener('input', (e) => {
 // ============================================================
 // 알고리즘 실행
 // ============================================================
-async function runAlgorithm() {
+async function runAlgorithm(confined = false) {
   if (!state.imageLoaded) {
     statusText.textContent = '이미지를 먼저 불러오세요';
     return;
   }
-  statusText.textContent = '처리 중…';
+  statusText.textContent = confined ? '영역 제한 처리 중…' : '처리 중…';
   runBtn.disabled = true;
+  runConfinedBtn.disabled = true;
   try {
     const imageDataUrl = imageCanvas.toDataURL('image/png');
     const maskHasContent = checkMaskContent();
@@ -802,7 +814,8 @@ async function runAlgorithm() {
         white_threshold: parseInt(whiteThresholdNum.value, 10) || 10,
         boundary_strength: 100,
         boundary_gamma: 100,
-        boundary_depth: parseInt(depthInput.value, 10) || 1,
+        boundary_depth: parseInt(depthInput.value, 10) || 0,
+        confined: confined,
       }),
     });
     if (!res.ok) {
@@ -831,6 +844,7 @@ async function runAlgorithm() {
     statusText.textContent = `에러: ${err.message}`;
   } finally {
     runBtn.disabled = false;
+    runConfinedBtn.disabled = false;
   }
 }
 
@@ -842,7 +856,8 @@ function checkMaskContent() {
   return false;
 }
 
-runBtn.addEventListener('click', runAlgorithm);
+runBtn.addEventListener('click', () => runAlgorithm(false));
+runConfinedBtn.addEventListener('click', () => runAlgorithm(true));
 
 // ============================================================
 // 결과 저장 / promote
