@@ -173,16 +173,6 @@ body { display: flex; flex-direction: column; overflow: hidden; }
     <input type="number" id="whiteThresholdNum" value="10" style="width:42px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
   </div>
   <div class="group">
-    <span class="label" title="문턱값: 높을수록 어두운 경계 픽셀도 투명화 대상에 포함">문턱값</span>
-    <input type="range" id="boundaryStrength" min="0" max="200" value="100">
-    <input type="number" id="strengthNum" value="100" style="width:48px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
-  </div>
-  <div class="group">
-    <span class="label" title="감마: 높을수록 투명화 곡선이 가팔라짐 (1.0=선형)">감마</span>
-    <input type="range" id="boundaryGamma" min="10" max="200" value="100">
-    <input type="number" id="gammaNum" value="3.3" step="0.1" style="width:48px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
-  </div>
-  <div class="group">
     <span class="label" title="투명 영역에서 안쪽으로 추가 명도 투명화할 픽셀 수">경계 확장</span>
     <input type="number" id="boundaryDepth" min="0" max="50" value="0" style="width:42px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
     <span class="label">px</span>
@@ -270,10 +260,6 @@ const statusText = $('#statusText');
 
 const whiteThresholdSlider = $('#whiteThreshold');
 const whiteThresholdNum = $('#whiteThresholdNum');
-const strengthSlider = $('#boundaryStrength');
-const strengthNum = $('#strengthNum');
-const gammaSlider = $('#boundaryGamma');
-const gammaNum = $('#gammaNum');
 const depthInput = $('#boundaryDepth');
 const cursorOverlay = $('#cursorOverlay');
 const zoomSlider = $('#zoomSlider');
@@ -749,20 +735,6 @@ whiteThresholdNum.addEventListener('input', (e) => {
   const v = parseInt(e.target.value, 10) || 0;
   whiteThresholdSlider.value = Math.max(0, Math.min(128, v));
 });
-strengthSlider.addEventListener('input', (e) => {
-  strengthNum.value = e.target.value;
-});
-strengthNum.addEventListener('input', (e) => {
-  const v = parseInt(e.target.value, 10) || 0;
-  strengthSlider.value = Math.max(0, Math.min(200, v));
-});
-gammaSlider.addEventListener('input', (e) => {
-  gammaNum.value = (parseInt(e.target.value, 10) / 30.0).toFixed(1);
-});
-gammaNum.addEventListener('input', (e) => {
-  const v = parseFloat(e.target.value) || 0;
-  gammaSlider.value = Math.max(10, Math.min(200, Math.round(v * 30)));
-});
 
 // ============================================================
 // 알고리즘 실행
@@ -786,8 +758,8 @@ async function runAlgorithm() {
         image: imageDataUrl,
         mask: maskDataUrl,
         white_threshold: parseInt(whiteThresholdNum.value, 10) || 10,
-        boundary_strength: parseInt(strengthNum.value, 10) || 100,
-        boundary_gamma: Math.round((parseFloat(gammaNum.value) || 3.3) * 30),
+        boundary_strength: 100,
+        boundary_gamma: 100,
         boundary_depth: parseInt(depthInput.value, 10) || 1,
       }),
     });
@@ -850,7 +822,20 @@ promoteBtn.addEventListener('click', () => {
   const url = URL.createObjectURL(state.resultBlob);
   const img = new Image();
   img.onload = () => {
-    setImage(img);  // 마스크 자동 초기화 (state.strokes/lassoPoints 포함)
+    // 줌/팬 유지한 채 캔버스만 교체
+    const w = img.naturalWidth, h = img.naturalHeight;
+    imageCanvas.width = maskCanvas.width = lassoPreviewCanvas.width = w;
+    imageCanvas.height = maskCanvas.height = lassoPreviewCanvas.height = h;
+    canvasContainer.style.width = w + 'px';
+    canvasContainer.style.height = h + 'px';
+    imageCtx.clearRect(0, 0, w, h);
+    imageCtx.drawImage(img, 0, 0);
+    maskCtx.clearRect(0, 0, w, h);
+    lassoCtx.clearRect(0, 0, w, h);
+    state.strokes = [];
+    state.lassoPoints = [];
+    state.imageLoaded = true;
+    // fitView() 호출하지 않음 — 줌/팬 보전
     URL.revokeObjectURL(url);
     state.resultBlob = null;
     resultCtx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
@@ -859,7 +844,7 @@ promoteBtn.addEventListener('click', () => {
     resultContainer.style.height = '0';
     saveResultBtn.disabled = true;
     promoteBtn.disabled = true;
-    statusText.textContent = '결과를 작업대로 이동 (마스크 초기화)';
+    statusText.textContent = '결과를 작업대로 이동 (마스크 초기화, 줌/팬 유지)';
   };
   img.src = url;
 });

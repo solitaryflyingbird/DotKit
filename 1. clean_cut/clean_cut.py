@@ -45,7 +45,9 @@ def load_rgba(path: str) -> np.ndarray:
 
 def save_png(pixels: np.ndarray, path: str) -> None:
     """RGBA numpy 배열을 PNG로 저장한다."""
-    Image.fromarray(pixels, "RGBA").save(path)
+    out = pixels.copy()
+    out[out[:, :, 3] == 0, :3] = 0
+    Image.fromarray(out, "RGBA").save(path)
 
 
 def save_psd(pixels: np.ndarray, path: str) -> None:
@@ -318,8 +320,12 @@ def _process_bytes(
 
     result = run_pipeline(px, mask_pixels=mask_px, threshold=white_threshold, boundary_strength=boundary_strength, boundary_gamma=boundary_gamma, boundary_depth=boundary_depth)
 
+    # 알파=0 픽셀의 RGB를 (0,0,0)으로 정리 — premultiplied alpha 호환
+    transparent = result[:, :, 3] == 0
+    result[transparent, :3] = 0
+
     out = BytesIO()
-    Image.fromarray(result).save(out, format="PNG")
+    Image.fromarray(result, "RGBA").save(out, format="PNG")
     return out.getvalue()
 
 
