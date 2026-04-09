@@ -123,6 +123,7 @@ def mark_background_from_mask(
     threshold: int = 10,
     mask_threshold: int = 10,
     confined: bool = False,
+    soft: bool = False,
 ) -> np.ndarray:
     """마스크 이미지의 ROI 픽셀을 시작점으로 BFS flood-fill을 실행하여 bg_mask를 갱신한다.
 
@@ -130,7 +131,10 @@ def mark_background_from_mask(
     이 함수가 유일한 배경 마킹 경로 — 테두리 자동 BFS는 더 이상 사용하지 않는다.
 
     confined=True이면 BFS가 마스크 ROI 영역 밖으로 확장하지 않는다.
-    머리카락 등 세밀한 영역을 다듬을 때 사용.
+
+    soft=True이고 threshold > 50이면 단계적 BFS 실행:
+    50부터 threshold까지 5씩 증가하며 반복. bg_mask를 공유하므로
+    각 단계에서 이전 경계에서만 확장 — 어두운 픽셀이 벽 역할.
 
     마스크 ROI 판정 (자동 인식):
     - HTML 그림판 마스크: 알파>0인 픽셀 (그려진 부분)
@@ -151,8 +155,16 @@ def mark_background_from_mask(
 
     roi_limit = is_roi if confined else None
     ys, xs = np.where(is_roi)
-    for y, x in zip(ys, xs):
-        _flood_from_seed(pixels, bg_mask, int(y), int(x), threshold, roi=roi_limit)
+    seeds = list(zip(ys, xs))
+
+    if soft and threshold > 50:
+        # 단계적 BFS: 50부터 threshold까지 5씩 증가
+        for t in range(50, threshold + 1, 5):
+            for y, x in seeds:
+                _flood_from_seed(pixels, bg_mask, int(y), int(x), t, roi=roi_limit)
+    else:
+        for y, x in seeds:
+            _flood_from_seed(pixels, bg_mask, int(y), int(x), threshold, roi=roi_limit)
 
     return bg_mask
 
@@ -291,7 +303,7 @@ def run_pipeline(
     roi = None
     if mask_pixels is not None:
         bg_mask = mark_background_from_mask(
-            pixels, bg_mask, mask_pixels, threshold=threshold, confined=confined
+            pixels, bg_mask, mask_pixels, threshold=threshold, confined=confined, soft=soft
         )
         if confined:
             # ROI 영역 계산 — 경계면/확장도 이 안으로 제한
