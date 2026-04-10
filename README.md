@@ -19,6 +19,7 @@ A collection of tools for pixel art and dot graphics workflow.
 - **부드러운 제거 (soft)** — 배경 영역에 하드컷(alpha=0) 대신 명도 비례 graduated alpha 적용
 - **단계적 BFS** — 부드러운 제거 시 threshold를 50부터 5씩 올리며 반복. 어두운 픽셀이 벽 역할하여 오브젝트 침투 방지
 - **흰색 오차 조절** — BFS 흰색 판별 허용 오차 (0~255). 높일수록 회색까지 배경으로 인식
+- **경계 확장** — 배경 제거된 영역의 경계에서 안쪽으로 N픽셀 추가로 명도 기반 투명도 적용 (기본 1px). 안티앨리어싱 잔여물 정리용
 
 #### 도구
 

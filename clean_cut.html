@@ -160,6 +160,11 @@ body { display: flex; flex-direction: column; overflow: hidden; }
     <input type="range" id="whiteThreshold" min="0" max="255" value="10">
     <input type="number" id="whiteThresholdNum" value="10" style="width:42px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
   </div>
+  <div class="group">
+    <span class="label" title="투명 영역에서 안쪽으로 추가 명도 투명화할 픽셀 수">경계 확장</span>
+    <input type="number" id="boundaryDepth" min="0" max="50" value="1" style="width:42px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
+    <span class="label">px</span>
+  </div>
   <div class="group" id="bgColorGroup">
     <span class="label">배경</span>
     <div class="bg-swatch bg-swatch-checker active" data-bg="checker" title="체커보드"></div>
@@ -306,6 +311,29 @@ function findBoundary(bgMask, w, h) {
   return boundary;
 }
 
+function expandBoundary(boundary, bgMask, w, h, depth) {
+  const expanded = new Uint8Array(boundary);
+  const dirs = [-1,0, 1,0, 0,-1, 0,1];
+  for (let d = 0; d < depth; d++) {
+    const newLayer = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (expanded[i]) { newLayer[i] = 1; continue; }
+        if (bgMask[i]) continue;
+        for (let dd = 0; dd < 8; dd += 2) {
+          const ny = y + dirs[dd], nx = x + dirs[dd+1];
+          if (ny >= 0 && ny < h && nx >= 0 && nx < w && expanded[ny * w + nx]) {
+            newLayer[i] = 1; break;
+          }
+        }
+      }
+    }
+    for (let i = 0; i < w * h; i++) expanded[i] = newLayer[i];
+  }
+  return expanded;
+}
+
 function applyBoundaryAlpha(result, boundary, w, h, strength, gammaRaw) {
   const threshold = 1.0 - strength / 100.0;
   const gamma = Math.max(gammaRaw, 1) / 30.0;
@@ -348,7 +376,10 @@ function runPipeline(imageData, maskData, w, h, opts) {
 
   removeBackground(result, bgMask, w, h, soft);
 
-  const boundary = findBoundary(bgMask, w, h);
+  let boundary = findBoundary(bgMask, w, h);
+  if (roi) for (let i = 0; i < w * h; i++) { if (!roi[i]) boundary[i] = 0; }
+  const depth = opts.boundaryDepth ?? 1;
+  if (depth > 0) boundary = expandBoundary(boundary, bgMask, w, h, depth);
   if (roi) for (let i = 0; i < w * h; i++) { if (!roi[i]) boundary[i] = 0; }
 
   applyBoundaryAlpha(result, boundary, w, h, strength, gammaRaw);
@@ -408,6 +439,7 @@ const saveResultBtn = $('#saveResultBtn');
 const promoteBtn = $('#promoteBtn');
 const statusText = $('#statusText');
 
+const depthInput = $('#boundaryDepth');
 const whiteThresholdSlider = $('#whiteThreshold');
 const whiteThresholdNum = $('#whiteThresholdNum');
 const cursorOverlay = $('#cursorOverlay');
@@ -726,6 +758,7 @@ function runAlgorithm(confined = false) {
           soft: softRemovalCheckbox.checked,
           boundaryStrength: 100,
           boundaryGamma: 100,
+          boundaryDepth: parseInt(depthInput.value, 10) || 1,
         }
       );
 

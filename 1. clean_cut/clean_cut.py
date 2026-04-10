@@ -285,7 +285,7 @@ def run_pipeline(
     pixels: np.ndarray,
     mask_pixels=None,
     threshold: int = 10,
-    boundary_depth: int = 0,
+    boundary_depth: int = 1,
     boundary_strength: int = 100,
     boundary_gamma: int = 100,
     confined: bool = False,
@@ -330,7 +330,7 @@ def clean_cut(
     input_path: str,
     output_path: str,
     threshold: int = 10,
-    boundary_depth: int = 0,
+    boundary_depth: int = 1,
     mask_path=None,
 ) -> None:
     """파일 기반 진입점."""
@@ -358,7 +358,7 @@ def _process_bytes(
     white_threshold: int = 10,
     boundary_strength: int = 100,
     boundary_gamma: int = 100,
-    boundary_depth: int = 0,
+    boundary_depth: int = 1,
     confined: bool = False,
     soft: bool = False,
 ) -> bytes:
@@ -429,7 +429,7 @@ def serve(port: int = 8765) -> None:
                 white_thresh = int(data.get("white_threshold", 10))
                 strength = int(data.get("boundary_strength", 100))
                 gamma = int(data.get("boundary_gamma", 100))
-                depth = int(data.get("boundary_depth", 0))
+                depth = int(data.get("boundary_depth", 1))
                 is_confined = bool(data.get("confined", False))
                 is_soft = bool(data.get("soft", False))
 
