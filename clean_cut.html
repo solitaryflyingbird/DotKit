@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>clean_cut — 스프라이트 선따기 (standalone)</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+html, body { height: 100%; background: #1a1a1a; color: #ddd; font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; font-size: 13px; }
+body { display: flex; flex-direction: column; overflow: hidden; }
+
+#toolbar {
+  padding: 8px 12px; background: #252525; border-bottom: 1px solid #333;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+#toolbar button {
+  background: #333; color: #ddd; border: 1px solid #444;
+  padding: 6px 12px; cursor: pointer; border-radius: 4px; font-size: 13px;
+}
+#toolbar button:hover:not(:disabled) { background: #404040; }
+#toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+#toolbar button.active { background: #4a90e2; border-color: #5a9eea; color: #fff; }
+#toolbar input[type=file] { color: #ddd; font-size: 12px; max-width: 220px; }
+#toolbar input[type=range] { width: 100px; }
+#toolbar .group {
+  display: flex; gap: 6px; align-items: center;
+  padding: 0 10px; border-right: 1px solid #333;
+}
+#toolbar .group:last-child { border-right: none; }
+.label { font-size: 11px; color: #888; }
+.swatch {
+  width: 26px; height: 26px; border-radius: 4px; cursor: pointer;
+  border: 2px solid #444;
+}
+.swatch.active { border-color: #fff; }
+#customColor {
+  width: 32px; height: 28px; border: 1px solid #444; border-radius: 4px;
+  background: none; cursor: pointer; padding: 0;
+}
+#runBtn { background: #2d7a3e; border-color: #3a8a4e; color: #fff; }
+#runBtn:hover:not(:disabled) { background: #36904a; }
+#runConfinedBtn:hover:not(:disabled) { background: #356a8a; }
+.hint { font-size: 11px; color: #666; margin-left: auto; }
+
+#workspace {
+  flex: 1; display: flex; gap: 1px; background: #0a0a0a; min-height: 0;
+}
+#workArea, #resultArea {
+  flex: 1; position: relative; overflow: hidden;
+  background: #0f0f0f; min-width: 0;
+}
+.checkerboard {
+  background-image:
+    linear-gradient(45deg, #1f1f1f 25%, transparent 25%),
+    linear-gradient(-45deg, #1f1f1f 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1f1f1f 75%),
+    linear-gradient(-45deg, transparent 75%, #1f1f1f 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+  background-color: #141414;
+}
+#workArea.space { cursor: grab; }
+#workArea.space.dragging { cursor: grabbing; }
+.canvas-container {
+  position: absolute; transform-origin: 0 0; left: 0; top: 0;
+}
+.canvas-container canvas {
+  display: block; position: absolute; left: 0; top: 0;
+  image-rendering: pixelated;
+}
+#maskCanvas { opacity: 0.5; pointer-events: none; }
+#lassoPreviewCanvas {
+  position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 15;
+}
+
+#resultArea { display: flex; flex-direction: column; }
+#resultViewport {
+  flex: 1; position: relative; overflow: hidden;
+}
+.result-canvas-container {
+  position: absolute; transform-origin: 0 0; left: 0; top: 0;
+}
+.result-canvas-container canvas {
+  display: block; position: absolute; left: 0; top: 0;
+  image-rendering: pixelated;
+}
+#resultActions {
+  padding: 8px 12px; background: #252525; border-top: 1px solid #333;
+  display: flex; gap: 8px; align-items: center;
+}
+
+.panel-header {
+  position: absolute; top: 8px; left: 8px; z-index: 10;
+  background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 4px;
+  font-size: 11px; color: #888; pointer-events: none;
+}
+
+#cursorOverlay {
+  position: absolute; pointer-events: none; z-index: 20;
+  border: 2px solid rgba(255,255,255,0.8);
+  border-radius: 50%; transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+  display: none;
+}
+#cursorOverlay.lasso-cursor {
+  border-radius: 0; border: none; box-shadow: none;
+  width: 20px !important; height: 20px !important;
+  background:
+    linear-gradient(rgba(255,255,255,0.9), rgba(255,255,255,0.9)) no-repeat center/2px 100%,
+    linear-gradient(rgba(255,255,255,0.9), rgba(255,255,255,0.9)) no-repeat center/100% 2px;
+  filter: drop-shadow(0 0 1px rgba(0,0,0,0.6));
+}
+
+#zoomBar {
+  position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+  z-index: 10; display: flex; gap: 6px; align-items: center;
+  background: rgba(0,0,0,0.6); padding: 4px 10px; border-radius: 6px;
+}
+#zoomBar input[type=range] { width: 120px; }
+#zoomBar .label { font-size: 11px; color: #aaa; }
+#zoomLabel { font-size: 11px; color: #ccc; min-width: 40px; text-align: center; }
+
+#bgColorGroup .bg-swatch {
+  width: 20px; height: 20px; border-radius: 3px; cursor: pointer;
+  border: 2px solid #444; display: inline-block;
+}
+#bgColorGroup .bg-swatch.active { border-color: #fff; }
+.bg-swatch-checker {
+  background-image:
+    linear-gradient(45deg, #888 25%, transparent 25%),
+    linear-gradient(-45deg, #888 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #888 75%),
+    linear-gradient(-45deg, transparent 75%, #888 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+  background-color: #ccc;
+}
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <div class="group">
+    <input type="file" id="fileInput" accept="image/*">
+  </div>
+  <div class="group">
+    <button data-tool="lasso" class="active">올가미</button>
+    <button data-tool="lasso-eraser">올가미 지우개</button>
+  </div>
+  <div class="group">
+    <span class="label">색</span>
+    <div class="swatch active" data-color="rgb(60,120,255)" style="background:rgb(60,120,255)"></div>
+    <input type="color" id="customColor" value="#3c78ff" title="커스텀 색">
+  </div>
+  <div class="group">
+    <button id="undoBtn">실행취소</button>
+  </div>
+  <div class="group">
+    <span class="label" title="흰색 허용 오차: 높을수록 회색도 배경으로 인식하여 제거">흰색 오차</span>
+    <input type="range" id="whiteThreshold" min="0" max="255" value="10">
+    <input type="number" id="whiteThresholdNum" value="10" style="width:42px;background:#333;color:#ddd;border:1px solid #444;border-radius:3px;padding:3px 4px;font-size:12px;text-align:center;">
+  </div>
+  <div class="group" id="bgColorGroup">
+    <span class="label">배경</span>
+    <div class="bg-swatch bg-swatch-checker active" data-bg="checker" title="체커보드"></div>
+    <input type="color" id="customBgColor" value="#808080" title="커스텀 배경색" style="width:24px;height:22px;border:1px solid #444;border-radius:3px;padding:0;cursor:pointer;">
+  </div>
+  <div class="group">
+    <label style="cursor:pointer;display:flex;align-items:center;gap:4px;" title="체크 시 배경 영역에 명도 비례 투명화 (하드컷 대신 그라데이션)">
+      <input type="checkbox" id="softRemoval"> <span class="label">부드러운 제거</span>
+    </label>
+  </div>
+  <div class="group">
+    <button id="runBtn">알고리즘 실행 ▶</button>
+    <button id="runConfinedBtn" style="background:#2a5a7a;border-color:#3a6a8a;color:#fff;">영역만 실행 ▶</button>
+  </div>
+  <span class="hint">휠=줌 · 스페이스+드래그=팬 · ⌘Z=실행취소 · 더블클릭/Enter=올가미 닫기</span>
+</div>
+
+<div id="workspace">
+  <div id="workArea" class="checkerboard">
+    <div class="panel-header">작업대</div>
+    <div id="cursorOverlay"></div>
+    <canvas id="lassoPreviewCanvas"></canvas>
+    <div class="canvas-container" id="canvasContainer">
+      <canvas id="imageCanvas"></canvas>
+      <canvas id="maskCanvas"></canvas>
+    </div>
+    <div id="zoomBar">
+      <span class="label">줌</span>
+      <input type="range" id="zoomSlider" min="5" max="4000" value="100">
+      <span id="zoomLabel">100%</span>
+    </div>
+  </div>
+  <div id="resultArea">
+    <div class="panel-header">결과</div>
+    <div id="resultViewport" class="checkerboard">
+      <div class="result-canvas-container" id="resultContainer">
+        <canvas id="resultCanvas"></canvas>
+      </div>
+    </div>
+    <div id="resultActions">
+      <button id="saveResultBtn" disabled>결과 저장</button>
+      <button id="promoteBtn" disabled>→ 작업대로</button>
+      <span class="hint" id="statusText"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 알고리즘 (Python → JS 포팅)
+// ============================================================
+const CleanCut = (() => {
+
+function isWhite(data, idx, threshold) {
+  return (255 - data[idx]) <= threshold &&
+         (255 - data[idx+1]) <= threshold &&
+         (255 - data[idx+2]) <= threshold;
+}
+
+function floodFromSeed(data, visited, w, h, sy, sx, threshold, roi) {
+  const idx0 = sy * w + sx;
+  if (visited[idx0]) return;
+  const pi = idx0 * 4;
+  if (!isWhite(data, pi, threshold)) return;
+  visited[idx0] = 1;
+  const queue = [sy, sx];
+  let head = 0;
+  const dirs = [-1,0, 1,0, 0,-1, 0,1];
+  while (head < queue.length) {
+    const cy = queue[head++], cx = queue[head++];
+    for (let d = 0; d < 8; d += 2) {
+      const ny = cy + dirs[d], nx = cx + dirs[d+1];
+      if (ny < 0 || ny >= h || nx < 0 || nx >= w) continue;
+      const ni = ny * w + nx;
+      if (visited[ni]) continue;
+      if (roi && !roi[ni]) continue;
+      if (isWhite(data, ni * 4, threshold)) {
+        visited[ni] = 1;
+        queue.push(ny, nx);
+      }
+    }
+  }
+}
+
+function markBackground(imageData, maskData, w, h, threshold, confined, soft) {
+  const bgMask = new Uint8Array(w * h);
+  const iData = imageData;
+  const mData = maskData;
+  // ROI: alpha > 10
+  const roi = confined ? new Uint8Array(w * h) : null;
+  const seeds = [];
+  for (let i = 0; i < w * h; i++) {
+    if (mData[i * 4 + 3] > 10) {
+      seeds.push(i);
+      if (roi) roi[i] = 1;
+    }
+  }
+
+  if (soft && threshold > 50) {
+    for (let t = 50; t <= threshold; t += 5) {
+      for (const si of seeds) {
+        const sy = (si / w) | 0, sx = si % w;
+        floodFromSeed(iData, bgMask, w, h, sy, sx, t, roi);
+      }
+    }
+  } else {
+    for (const si of seeds) {
+      const sy = (si / w) | 0, sx = si % w;
+      floodFromSeed(iData, bgMask, w, h, sy, sx, threshold, roi);
+    }
+  }
+  return bgMask;
+}
+
+function removeBackground(result, bgMask, w, h, soft) {
+  for (let i = 0; i < w * h; i++) {
+    if (!bgMask[i]) continue;
+    const pi = i * 4;
+    if (!soft) {
+      result[pi + 3] = 0;
+    } else {
+      const brightness = (result[pi] + result[pi+1] + result[pi+2]) / (3 * 255);
+      result[pi + 3] = Math.max(0, Math.min(255, ((1 - brightness) * 255) | 0));
+    }
+  }
+}
+
+function findBoundary(bgMask, w, h) {
+  const boundary = new Uint8Array(w * h);
+  const dirs = [-1,0, 1,0, 0,-1, 0,1];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (bgMask[i]) continue; // 배경이면 스킵
+      for (let d = 0; d < 8; d += 2) {
+        const ny = y + dirs[d], nx = x + dirs[d+1];
+        if (ny >= 0 && ny < h && nx >= 0 && nx < w && bgMask[ny * w + nx]) {
+          boundary[i] = 1;
+          break;
+        }
+      }
+    }
+  }
+  return boundary;
+}
+
+function applyBoundaryAlpha(result, boundary, w, h, strength, gammaRaw) {
+  const threshold = 1.0 - strength / 100.0;
+  const gamma = Math.max(gammaRaw, 1) / 30.0;
+  for (let i = 0; i < w * h; i++) {
+    if (!boundary[i]) continue;
+    const pi = i * 4;
+    const r = result[pi], g = result[pi+1], b = result[pi+2];
+    const brightness = (r + g + b) / (3 * 255);
+    const alpha = Math.pow(1 - brightness, gamma) * 255;
+    const blend = Math.max(0, Math.min(1, (brightness - threshold) / 0.1));
+    const origAlpha = result[pi + 3];
+    result[pi + 3] = Math.max(0, Math.min(255, (origAlpha * (1 - blend) + alpha * blend) | 0));
+  }
+}
+
+function runPipeline(imageData, maskData, w, h, opts) {
+  const threshold = opts.whiteThreshold || 10;
+  const confined = !!opts.confined;
+  const soft = !!opts.soft;
+  const strength = opts.boundaryStrength ?? 100;
+  const gammaRaw = opts.boundaryGamma ?? 100;
+
+  const result = new Uint8ClampedArray(imageData);
+  const origAlpha = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) origAlpha[i] = imageData[i * 4 + 3];
+
+  let bgMask;
+  let roi = null;
+  if (maskData) {
+    bgMask = markBackground(imageData, maskData, w, h, threshold, confined, soft);
+    if (confined) {
+      roi = new Uint8Array(w * h);
+      for (let i = 0; i < w * h; i++) {
+        if (maskData[i * 4 + 3] > 10) roi[i] = 1;
+      }
+    }
+  } else {
+    bgMask = new Uint8Array(w * h);
+  }
+
+  removeBackground(result, bgMask, w, h, soft);
+
+  const boundary = findBoundary(bgMask, w, h);
+  if (roi) for (let i = 0; i < w * h; i++) { if (!roi[i]) boundary[i] = 0; }
+
+  applyBoundaryAlpha(result, boundary, w, h, strength, gammaRaw);
+
+  // 가드: 원본보다 불투명해지면 원본 유지
+  for (let i = 0; i < w * h; i++) {
+    const pi = i * 4;
+    if (result[pi + 3] > origAlpha[i]) result[pi + 3] = origAlpha[i];
+  }
+
+  // alpha=0 픽셀 RGB 정리
+  for (let i = 0; i < w * h; i++) {
+    const pi = i * 4;
+    if (result[pi + 3] === 0) { result[pi] = 0; result[pi+1] = 0; result[pi+2] = 0; }
+  }
+
+  return result;
+}
+
+return { runPipeline };
+})();
+
+// ============================================================
+// 상태
+// ============================================================
+const state = {
+  tool: 'lasso',
+  color: 'rgb(60,120,255)',
+  view: { scale: 1, panX: 0, panY: 0 },
+  strokes: [],
+  imageLoaded: false,
+  spacePressed: false,
+  lassoPoints: [],
+  resultImageData: null,
+  panStart: null,
+};
+
+// ============================================================
+// DOM
+// ============================================================
+const $ = (sel) => document.querySelector(sel);
+const fileInput = $('#fileInput');
+const undoBtn = $('#undoBtn');
+const softRemovalCheckbox = $('#softRemoval');
+const runBtn = $('#runBtn');
+const runConfinedBtn = $('#runConfinedBtn');
+const customColorInput = $('#customColor');
+const workArea = $('#workArea');
+const canvasContainer = $('#canvasContainer');
+const imageCanvas = $('#imageCanvas');
+const maskCanvas = $('#maskCanvas');
+const lassoPreviewCanvas = $('#lassoPreviewCanvas');
+const resultCanvas = $('#resultCanvas');
+const resultContainer = $('#resultContainer');
+const resultViewport = $('#resultViewport');
+const saveResultBtn = $('#saveResultBtn');
+const promoteBtn = $('#promoteBtn');
+const statusText = $('#statusText');
+
+const whiteThresholdSlider = $('#whiteThreshold');
+const whiteThresholdNum = $('#whiteThresholdNum');
+const cursorOverlay = $('#cursorOverlay');
+const zoomSlider = $('#zoomSlider');
+const zoomLabel = $('#zoomLabel');
+const customBgColor = $('#customBgColor');
+
+const imageCtx = imageCanvas.getContext('2d');
+const maskCtx = maskCanvas.getContext('2d');
+const lassoCtx = lassoPreviewCanvas.getContext('2d');
+const resultCtx = resultCanvas.getContext('2d');
+
+// ============================================================
+// 이미지 불러오기
+// ============================================================
+fileInput.addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (f) loadImageFile(f);
+});
+['dragenter', 'dragover'].forEach(ev => {
+  workArea.addEventListener(ev, (e) => { e.preventDefault(); });
+});
+workArea.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) loadImageFile(f);
+});
+function loadImageFile(file) {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => { setImage(img); URL.revokeObjectURL(url); };
+  img.onerror = () => { statusText.textContent = '이미지 로드 실패'; URL.revokeObjectURL(url); };
+  img.src = url;
+}
+function setImage(img) {
+  const w = img.naturalWidth, h = img.naturalHeight;
+  imageCanvas.width = maskCanvas.width = w;
+  imageCanvas.height = maskCanvas.height = h;
+  canvasContainer.style.width = w + 'px';
+  canvasContainer.style.height = h + 'px';
+  imageCtx.clearRect(0, 0, w, h);
+  imageCtx.drawImage(img, 0, 0);
+  maskCtx.clearRect(0, 0, w, h);
+  resizeLassoCanvas();
+  state.strokes = [];
+  state.lassoPoints = [];
+  state.imageLoaded = true;
+  fitView();
+  statusText.textContent = `${w}×${h} 로드됨`;
+}
+
+// ============================================================
+// 줌/팬
+// ============================================================
+function fitView() {
+  const wa = workArea.getBoundingClientRect();
+  const w = imageCanvas.width, h = imageCanvas.height;
+  if (!w || !h) return;
+  const sx = wa.width / w, sy = wa.height / h;
+  state.view.scale = Math.min(sx, sy) * 0.95;
+  state.view.panX = (wa.width - w * state.view.scale) / 2;
+  state.view.panY = (wa.height - h * state.view.scale) / 2;
+  applyView();
+}
+function applyView() {
+  const v = state.view;
+  canvasContainer.style.transform = `translate(${v.panX}px, ${v.panY}px) scale(${v.scale})`;
+  syncResultView();
+  if (state.lassoPoints.length > 0) redrawLassoPreview();
+  syncZoomSlider();
+}
+function syncResultView() {
+  const wa = workArea.getBoundingClientRect();
+  const rv = resultViewport.getBoundingClientRect();
+  const v = state.view;
+  resultContainer.style.transform = `translate(${v.panX + (rv.width - wa.width) / 2}px, ${v.panY + (rv.height - wa.height) / 2}px) scale(${v.scale})`;
+}
+
+// ============================================================
+// 커서 프리뷰
+// ============================================================
+function updateCursor(clientX, clientY) {
+  if (!state.imageLoaded || state.spacePressed) { cursorOverlay.style.display = 'none'; return; }
+  const rect = workArea.getBoundingClientRect();
+  const left = clientX - rect.left, top = clientY - rect.top;
+  if (left < 0 || top < 0 || left > rect.width || top > rect.height) { cursorOverlay.style.display = 'none'; return; }
+  cursorOverlay.style.display = 'block';
+  cursorOverlay.style.left = left + 'px';
+  cursorOverlay.style.top = top + 'px';
+  cursorOverlay.classList.add('lasso-cursor');
+}
+workArea.addEventListener('mouseleave', () => { cursorOverlay.style.display = 'none'; });
+workArea.style.cursor = 'none';
+
+// ============================================================
+// 줌 슬라이더
+// ============================================================
+function syncZoomSlider() {
+  const pct = Math.round(state.view.scale * 100);
+  zoomSlider.value = Math.max(5, Math.min(4000, pct));
+  zoomLabel.textContent = pct + '%';
+}
+zoomSlider.addEventListener('input', (e) => {
+  const newScale = parseInt(e.target.value, 10) / 100;
+  const rect = workArea.getBoundingClientRect();
+  const cx = rect.width / 2, cy = rect.height / 2;
+  state.view.panX = cx - (cx - state.view.panX) * (newScale / state.view.scale);
+  state.view.panY = cy - (cy - state.view.panY) * (newScale / state.view.scale);
+  state.view.scale = newScale;
+  applyView();
+});
+
+// ============================================================
+// 배경색 선택
+// ============================================================
+const checkerCSS = `linear-gradient(45deg, #1f1f1f 25%, transparent 25%),linear-gradient(-45deg, #1f1f1f 25%, transparent 25%),linear-gradient(45deg, transparent 75%, #1f1f1f 75%),linear-gradient(-45deg, transparent 75%, #1f1f1f 75%)`;
+function applyBgColor(color) {
+  [workArea, resultViewport].forEach(el => {
+    if (color === 'checker') {
+      el.style.backgroundImage = checkerCSS;
+      el.style.backgroundColor = '#141414';
+      el.style.backgroundSize = '20px 20px';
+      el.style.backgroundPosition = '0 0, 0 10px, 10px -10px, -10px 0px';
+    } else {
+      el.style.backgroundImage = 'none';
+      el.style.backgroundColor = color;
+    }
+  });
+}
+document.querySelectorAll('.bg-swatch').forEach(s => {
+  s.addEventListener('click', () => {
+    document.querySelectorAll('.bg-swatch').forEach(x => x.classList.remove('active'));
+    s.classList.add('active');
+    applyBgColor(s.dataset.bg);
+  });
+});
+customBgColor.addEventListener('input', (e) => {
+  document.querySelectorAll('.bg-swatch').forEach(x => x.classList.remove('active'));
+  applyBgColor(e.target.value);
+});
+
+workArea.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = workArea.getBoundingClientRect();
+  const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+  const factor = e.deltaY > 0 ? 1 / 1.15 : 1.15;
+  const newScale = Math.max(0.05, Math.min(40, state.view.scale * factor));
+  state.view.panX = cx - (cx - state.view.panX) * (newScale / state.view.scale);
+  state.view.panY = cy - (cy - state.view.panY) * (newScale / state.view.scale);
+  state.view.scale = newScale;
+  applyView();
+}, { passive: false });
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && !state.spacePressed) {
+    state.spacePressed = true; workArea.classList.add('space');
+    workArea.style.cursor = 'grab'; cursorOverlay.style.display = 'none';
+    e.preventDefault();
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+  if (e.key === 'Enter' && (state.tool === 'lasso' || state.tool === 'lasso-eraser') && state.lassoPoints.length >= 3) closeLasso();
+  if (e.key === 'Escape' && state.lassoPoints.length > 0) { state.lassoPoints = []; redrawLassoPreview(); }
+});
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space') { state.spacePressed = false; workArea.classList.remove('space', 'dragging'); workArea.style.cursor = 'none'; }
+});
+
+// ============================================================
+// 좌표 변환 + 입력 처리
+// ============================================================
+function screenToImage(clientX, clientY) {
+  const rect = workArea.getBoundingClientRect();
+  return { x: (clientX - rect.left - state.view.panX) / state.view.scale, y: (clientY - rect.top - state.view.panY) / state.view.scale };
+}
+
+workArea.addEventListener('mousedown', (e) => {
+  if (!state.imageLoaded || e.button !== 0) return;
+  if (state.spacePressed) {
+    state.panStart = { x: e.clientX, y: e.clientY, panX: state.view.panX, panY: state.view.panY };
+    workArea.classList.add('dragging'); return;
+  }
+  const p = screenToImage(e.clientX, e.clientY);
+  if (state.tool === 'lasso' || state.tool === 'lasso-eraser') { state.lassoPoints.push(p); redrawLassoPreview(); }
+});
+workArea.addEventListener('mousemove', (e) => {
+  updateCursor(e.clientX, e.clientY);
+  if (state.panStart) {
+    state.view.panX = state.panStart.panX + (e.clientX - state.panStart.x);
+    state.view.panY = state.panStart.panY + (e.clientY - state.panStart.y);
+    applyView(); return;
+  }
+  if ((state.tool === 'lasso' || state.tool === 'lasso-eraser') && state.lassoPoints.length > 0) {
+    redrawLassoPreview(screenToImage(e.clientX, e.clientY));
+  }
+});
+window.addEventListener('mouseup', (e) => {
+  if (state.panStart) { state.panStart = null; workArea.classList.remove('dragging'); }
+});
+workArea.addEventListener('dblclick', () => {
+  if ((state.tool === 'lasso' || state.tool === 'lasso-eraser') && state.lassoPoints.length >= 3) closeLasso();
+});
+
+// ============================================================
+// 올가미
+// ============================================================
+function resizeLassoCanvas() {
+  const rect = workArea.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  lassoPreviewCanvas.width = rect.width * dpr;
+  lassoPreviewCanvas.height = rect.height * dpr;
+  lassoCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function imageToScreen(p) {
+  return { x: p.x * state.view.scale + state.view.panX, y: p.y * state.view.scale + state.view.panY };
+}
+function redrawLassoPreview(hoverPoint) {
+  const dpr = window.devicePixelRatio || 1;
+  lassoCtx.clearRect(0, 0, lassoPreviewCanvas.width / dpr, lassoPreviewCanvas.height / dpr);
+  if (state.lassoPoints.length === 0) return;
+  const col = state.color;
+  const pts = state.lassoPoints.map(imageToScreen);
+  const hover = hoverPoint ? imageToScreen(hoverPoint) : null;
+  lassoCtx.save();
+  lassoCtx.lineCap = 'round'; lassoCtx.lineJoin = 'round';
+  lassoCtx.strokeStyle = 'rgba(255,255,255,0.6)'; lassoCtx.lineWidth = 3; lassoCtx.setLineDash([]);
+  lassoCtx.beginPath(); lassoCtx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) lassoCtx.lineTo(pts[i].x, pts[i].y);
+  if (hover) lassoCtx.lineTo(hover.x, hover.y); lassoCtx.stroke();
+  lassoCtx.strokeStyle = col; lassoCtx.lineWidth = 1.5; lassoCtx.setLineDash([6, 4]);
+  lassoCtx.beginPath(); lassoCtx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) lassoCtx.lineTo(pts[i].x, pts[i].y);
+  if (hover) lassoCtx.lineTo(hover.x, hover.y); lassoCtx.stroke();
+  lassoCtx.setLineDash([]); lassoCtx.fillStyle = col; lassoCtx.strokeStyle = 'rgba(255,255,255,0.8)'; lassoCtx.lineWidth = 1.5;
+  for (const p of pts) { lassoCtx.beginPath(); lassoCtx.arc(p.x, p.y, 4, 0, Math.PI * 2); lassoCtx.fill(); lassoCtx.stroke(); }
+  lassoCtx.restore();
+}
+function closeLasso() {
+  if (state.lassoPoints.length < 3) return;
+  const isEraser = state.tool === 'lasso-eraser';
+  const stroke = { type: isEraser ? 'lasso-eraser' : 'lasso', color: isEraser ? '' : state.color, points: [...state.lassoPoints] };
+  drawLassoFill(stroke); state.strokes.push(stroke);
+  state.lassoPoints = []; redrawLassoPreview();
+}
+function drawLassoFill(stroke) {
+  maskCtx.save();
+  if (stroke.type === 'lasso-eraser') { maskCtx.globalCompositeOperation = 'destination-out'; maskCtx.fillStyle = 'rgba(0,0,0,1)'; }
+  else { maskCtx.globalCompositeOperation = 'source-over'; maskCtx.fillStyle = stroke.color; }
+  maskCtx.beginPath(); const pts = stroke.points;
+  maskCtx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) maskCtx.lineTo(pts[i].x, pts[i].y);
+  maskCtx.closePath(); maskCtx.fill(); maskCtx.restore();
+}
+
+// ============================================================
+// Undo
+// ============================================================
+function undo() {
+  if (state.strokes.length === 0) return;
+  state.strokes.pop();
+  maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+  for (const s of state.strokes) {
+    if (s.type === 'lasso' || s.type === 'lasso-eraser') drawLassoFill(s);
+  }
+}
+undoBtn.addEventListener('click', undo);
+
+// ============================================================
+// 도구/색 변경
+// ============================================================
+document.querySelectorAll('[data-tool]').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('[data-tool]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active'); state.tool = b.dataset.tool;
+    const isLassoType = state.tool === 'lasso' || state.tool === 'lasso-eraser';
+    if (!isLassoType && state.lassoPoints.length > 0) { state.lassoPoints = []; redrawLassoPreview(); }
+  });
+});
+document.querySelectorAll('.swatch').forEach(s => {
+  s.addEventListener('click', () => {
+    document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
+    s.classList.add('active'); state.color = s.dataset.color;
+  });
+});
+customColorInput.addEventListener('input', (e) => {
+  const hex = e.target.value;
+  state.color = `rgb(${parseInt(hex.slice(1,3),16)},${parseInt(hex.slice(3,5),16)},${parseInt(hex.slice(5,7),16)})`;
+  document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
+});
+whiteThresholdSlider.addEventListener('input', (e) => { whiteThresholdNum.value = e.target.value; });
+whiteThresholdNum.addEventListener('input', (e) => { whiteThresholdSlider.value = Math.max(0, Math.min(255, parseInt(e.target.value,10)||0)); });
+
+// ============================================================
+// 알고리즘 실행 (로컬 JS)
+// ============================================================
+function runAlgorithm(confined = false) {
+  if (!state.imageLoaded) { statusText.textContent = '이미지를 먼저 불러오세요'; return; }
+  statusText.textContent = confined ? '영역 제한 처리 중…' : '처리 중…';
+  runBtn.disabled = true; runConfinedBtn.disabled = true;
+  // setTimeout으로 UI 업데이트 후 실행
+  setTimeout(() => {
+    try {
+      const t0 = performance.now();
+      const w = imageCanvas.width, h = imageCanvas.height;
+      const imageData = imageCtx.getImageData(0, 0, w, h).data;
+      const maskData = maskCtx.getImageData(0, 0, w, h).data;
+      let hasMask = false;
+      for (let i = 3; i < maskData.length; i += 4) { if (maskData[i] > 0) { hasMask = true; break; } }
+
+      const result = CleanCut.runPipeline(
+        imageData,
+        hasMask ? maskData : null,
+        w, h,
+        {
+          whiteThreshold: parseInt(whiteThresholdNum.value, 10) || 10,
+          confined: confined,
+          soft: softRemovalCheckbox.checked,
+          boundaryStrength: 100,
+          boundaryGamma: 100,
+        }
+      );
+
+      resultCanvas.width = w; resultCanvas.height = h;
+      resultContainer.style.width = w + 'px'; resultContainer.style.height = h + 'px';
+      const outImageData = new ImageData(result, w, h);
+      resultCtx.putImageData(outImageData, 0, 0);
+      syncResultView();
+
+      // blob for save
+      resultCanvas.toBlob((blob) => { state.resultBlob = blob; });
+      saveResultBtn.disabled = false; promoteBtn.disabled = false;
+      statusText.textContent = `완료 (${Math.round(performance.now() - t0)} ms)`;
+    } catch (err) {
+      statusText.textContent = `에러: ${err.message}`;
+    } finally {
+      runBtn.disabled = false; runConfinedBtn.disabled = false;
+    }
+  }, 10);
+}
+
+runBtn.addEventListener('click', () => runAlgorithm(false));
+runConfinedBtn.addEventListener('click', () => runAlgorithm(true));
+
+// ============================================================
+// 결과 저장 / promote
+// ============================================================
+saveResultBtn.addEventListener('click', () => {
+  resultCanvas.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'clean_cut_result.png';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+});
+promoteBtn.addEventListener('click', () => {
+  const w = resultCanvas.width, h = resultCanvas.height;
+  if (!w || !h) return;
+  const data = resultCtx.getImageData(0, 0, w, h);
+  imageCanvas.width = maskCanvas.width = w;
+  imageCanvas.height = maskCanvas.height = h;
+  canvasContainer.style.width = w + 'px'; canvasContainer.style.height = h + 'px';
+  imageCtx.putImageData(data, 0, 0);
+  maskCtx.clearRect(0, 0, w, h); resizeLassoCanvas();
+  state.strokes = []; state.lassoPoints = []; state.imageLoaded = true;
+  resultCtx.clearRect(0, 0, w, h);
+  resultCanvas.width = resultCanvas.height = 0;
+  resultContainer.style.width = '0'; resultContainer.style.height = '0';
+  saveResultBtn.disabled = true; promoteBtn.disabled = true;
+  statusText.textContent = '결과를 작업대로 이동 (마스크 초기화, 줌/팬 유지)';
+});
+
+window.addEventListener('resize', () => {
+  if (state.imageLoaded) { resizeLassoCanvas(); applyView(); }
+});
+</script>
+</body>
+</html>
