@@ -89,14 +89,18 @@ def _flood_from_seed(
     sx: int,
     threshold: int = 10,
     roi: np.ndarray = None,
+    exclude: np.ndarray = None,
 ) -> None:
     """단일 시작점에서 흰색 인접 영역을 BFS flood-fill하여 visited를 in-place로 갱신.
 
     시작점이 이미 visited이거나 흰색이 아니면 아무 일도 하지 않는다.
 
     roi가 주어지면 ROI 영역 밖으로는 확장하지 않는다 (영역 제한 모드).
+    exclude가 주어지면 제외 영역 픽셀은 벽으로 취급하여 통과하지 않는다.
     """
     if visited[sy, sx]:
+        return
+    if exclude is not None and exclude[sy, sx]:
         return
     if not is_white(pixels[sy, sx, :3], threshold):
         return
@@ -111,6 +115,8 @@ def _flood_from_seed(
             if 0 <= ny < h and 0 <= nx < w and not visited[ny, nx]:
                 if roi is not None and not roi[ny, nx]:
                     continue
+                if exclude is not None and exclude[ny, nx]:
+                    continue
                 if is_white(pixels[ny, nx, :3], threshold):
                     visited[ny, nx] = True
                     queue.append((ny, nx))
@@ -124,6 +130,7 @@ def mark_background_from_mask(
     mask_threshold: int = 10,
     confined: bool = False,
     soft: bool = False,
+    exclude: np.ndarray = None,
 ) -> np.ndarray:
     """마스크 이미지의 ROI 픽셀을 시작점으로 BFS flood-fill을 실행하여 bg_mask를 갱신한다.
 
@@ -158,13 +165,12 @@ def mark_background_from_mask(
     seeds = list(zip(ys, xs))
 
     if soft and threshold > 50:
-        # 단계적 BFS: 50부터 threshold까지 5씩 증가
         for t in range(50, threshold + 1, 5):
             for y, x in seeds:
-                _flood_from_seed(pixels, bg_mask, int(y), int(x), t, roi=roi_limit)
+                _flood_from_seed(pixels, bg_mask, int(y), int(x), t, roi=roi_limit, exclude=exclude)
     else:
         for y, x in seeds:
-            _flood_from_seed(pixels, bg_mask, int(y), int(x), threshold, roi=roi_limit)
+            _flood_from_seed(pixels, bg_mask, int(y), int(x), threshold, roi=roi_limit, exclude=exclude)
 
     return bg_mask
 
@@ -290,6 +296,7 @@ def run_pipeline(
     boundary_gamma: int = 100,
     confined: bool = False,
     soft: bool = False,
+    exclude_pixels=None,
 ) -> np.ndarray:
     """numpy 배열만 다루는 알고리즘 핵심.
 
@@ -298,12 +305,20 @@ def run_pipeline(
 
     mask_pixels=None이면 bg_mask는 전부 False로 시작 → 어떤 배경 제거도
     일어나지 않음 (no-op). 반드시 마스크가 필요한 설계.
+
+    exclude_pixels가 주어지면 해당 영역은 BFS가 통과하지 않는다.
     """
+    # 제외 마스크 생성
+    exclude = None
+    if exclude_pixels is not None:
+        ex_alpha = exclude_pixels[..., 3]
+        exclude = ex_alpha > 10
+
     bg_mask = np.zeros(pixels.shape[:2], dtype=bool)
     roi = None
     if mask_pixels is not None:
         bg_mask = mark_background_from_mask(
-            pixels, bg_mask, mask_pixels, threshold=threshold, confined=confined, soft=soft
+            pixels, bg_mask, mask_pixels, threshold=threshold, confined=confined, soft=soft, exclude=exclude
         )
         if confined:
             # ROI 영역 계산 — 경계면/확장도 이 안으로 제한
@@ -355,6 +370,7 @@ def clean_cut(
 def _process_bytes(
     image_bytes: bytes,
     mask_bytes,
+    exclude_bytes=None,
     white_threshold: int = 10,
     boundary_strength: int = 100,
     boundary_gamma: int = 100,
@@ -373,7 +389,14 @@ def _process_bytes(
             mask_img = mask_img.resize(img.size)
         mask_px = np.array(mask_img)
 
-    result = run_pipeline(px, mask_pixels=mask_px, threshold=white_threshold, boundary_strength=boundary_strength, boundary_gamma=boundary_gamma, boundary_depth=boundary_depth, confined=confined, soft=soft)
+    exclude_px = None
+    if exclude_bytes:
+        ex_img = Image.open(BytesIO(exclude_bytes)).convert("RGBA")
+        if ex_img.size != img.size:
+            ex_img = ex_img.resize(img.size)
+        exclude_px = np.array(ex_img)
+
+    result = run_pipeline(px, mask_pixels=mask_px, threshold=white_threshold, boundary_strength=boundary_strength, boundary_gamma=boundary_gamma, boundary_depth=boundary_depth, confined=confined, soft=soft, exclude_pixels=exclude_px)
 
     # 알파=0 픽셀의 RGB를 (0,0,0)으로 정리 — premultiplied alpha 호환
     transparent = result[:, :, 3] == 0
@@ -426,6 +449,8 @@ def serve(port: int = 8765) -> None:
                     raise ValueError("image 필드 없음")
                 image_bytes = base64.b64decode(image_b64)
                 mask_bytes = base64.b64decode(mask_b64) if mask_b64 else None
+                exclude_b64 = _strip_data_url(data.get("exclude", ""))
+                exclude_bytes = base64.b64decode(exclude_b64) if exclude_b64 else None
                 white_thresh = int(data.get("white_threshold", 10))
                 strength = int(data.get("boundary_strength", 100))
                 gamma = int(data.get("boundary_gamma", 100))
@@ -433,7 +458,7 @@ def serve(port: int = 8765) -> None:
                 is_confined = bool(data.get("confined", False))
                 is_soft = bool(data.get("soft", False))
 
-                result_bytes = _process_bytes(image_bytes, mask_bytes, white_threshold=white_thresh, boundary_strength=strength, boundary_gamma=gamma, boundary_depth=depth, confined=is_confined, soft=is_soft)
+                result_bytes = _process_bytes(image_bytes, mask_bytes, exclude_bytes=exclude_bytes, white_threshold=white_thresh, boundary_strength=strength, boundary_gamma=gamma, boundary_depth=depth, confined=is_confined, soft=is_soft)
             except Exception as e:
                 err_msg = f"{type(e).__name__}: {e}"
                 self.send_response(500)
