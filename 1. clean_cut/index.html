@@ -218,7 +218,6 @@ body { display: flex; flex-direction: column; overflow: hidden; }
     <div id="resultActions">
       <button id="saveResultBtn" disabled>결과 저장</button>
       <button id="promoteBtn" disabled>→ 작업대로</button>
-      <button id="saveLogBtn" disabled>로그 저장</button>
       <span class="hint" id="statusText"></span>
     </div>
   </div>
@@ -240,8 +239,6 @@ const state = {
   lassoPoints: [],
   resultBlob: null,
   panStart: null,
-  alphaLog: [],
-  pendingLogEntry: null,
 };
 
 // ============================================================
@@ -265,7 +262,6 @@ const resultContainer = $('#resultContainer');
 const resultViewport = $('#resultViewport');
 const saveResultBtn = $('#saveResultBtn');
 const promoteBtn = $('#promoteBtn');
-const saveLogBtn = $('#saveLogBtn');
 const statusText = $('#statusText');
 
 const depthInput = $('#boundaryDepth');
@@ -323,9 +319,6 @@ function setImage(img) {
   resizeLassoCanvas();
   state.strokes = [];
   state.lassoPoints = [];
-  state.alphaLog = [];
-  state.pendingLogEntry = null;
-  saveLogBtn.disabled = true;
   state.imageLoaded = true;
   fitView();
   statusText.textContent = `${w}×${h} 로드됨`;
@@ -817,22 +810,6 @@ async function runAlgorithm(confined = false) {
       URL.revokeObjectURL(url);
       syncResultView();
 
-      // 알파 변경을 임시 보관 (작업대로 이동 시 확정)
-      const origData = imageCtx.getImageData(0, 0, rw, rh).data;
-      const resData = resultCtx.getImageData(0, 0, rw, rh).data;
-      const pendingChanges = {};
-      for (let i = 0; i < rw * rh; i++) {
-        const origA = origData[i * 4 + 3];
-        const newA = resData[i * 4 + 3];
-        if (origA !== newA) {
-          const key = String(newA);
-          if (!pendingChanges[key]) pendingChanges[key] = [];
-          pendingChanges[key].push([i % rw, (i / rw) | 0]);
-        }
-      }
-      state.pendingLogEntry = Object.keys(pendingChanges).length > 0
-        ? { changes: pendingChanges } : null;
-
       saveResultBtn.disabled = false;
       promoteBtn.disabled = false;
       statusText.textContent = `완료 (${Math.round(performance.now() - t0)} ms)`;
@@ -878,12 +855,6 @@ saveResultBtn.addEventListener('click', () => {
 
 promoteBtn.addEventListener('click', () => {
   if (!state.resultBlob) return;
-  // pending 로그 확정
-  if (state.pendingLogEntry) {
-    state.alphaLog.push(state.pendingLogEntry);
-    state.pendingLogEntry = null;
-    saveLogBtn.disabled = false;
-  }
   const url = URL.createObjectURL(state.resultBlob);
   const img = new Image();
   img.onload = () => {
@@ -913,42 +884,6 @@ promoteBtn.addEventListener('click', () => {
     statusText.textContent = '결과를 작업대로 이동 (마스크 초기화, 줌/팬 유지)';
   };
   img.src = url;
-});
-
-// ============================================================
-// 로그 저장
-// ============================================================
-saveLogBtn.addEventListener('click', () => {
-  if (state.alphaLog.length === 0) return;
-  const w = imageCanvas.width, h = imageCanvas.height;
-  // 같은 좌표가 여러 번 변경된 경우 마지막 값만 유지
-  const pixelMap = new Map();
-  for (const entry of state.alphaLog) {
-    for (const [alphaStr, coords] of Object.entries(entry.changes)) {
-      for (const [x, y] of coords) {
-        pixelMap.set(y * w + x, parseInt(alphaStr, 10));
-      }
-    }
-  }
-  // 알파값별로 재그룹
-  const final = {};
-  for (const [idx, alpha] of pixelMap) {
-    const key = String(alpha);
-    if (!final[key]) final[key] = [];
-    final[key].push([idx % w, (idx / w) | 0]);
-  }
-  const log = {
-    image: { width: w, height: h },
-    totalPixels: pixelMap.size,
-    changes: final,
-  };
-  const json = JSON.stringify(log);
-  const blob = new Blob([json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'clean_cut_log.json';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  statusText.textContent = `로그 저장 완료 (${pixelMap.size}px 변경 기록)`;
 });
 
 window.addEventListener('resize', () => {
