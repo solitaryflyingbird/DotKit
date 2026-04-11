@@ -126,54 +126,57 @@ def test_expand_boundary_depth():
 # ── apply_boundary_alpha ──
 
 def test_boundary_alpha_white_pixel():
-    """흰색(255,255,255) 경계 픽셀 → 알파 ≈ 0"""
+    """흰색(255,255,255) 경계 픽셀 → RGB=(0,0,0), alpha=0"""
     pixels = np.array([[[255, 255, 255, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
     assert result[0, 0, 3] == 0
+    assert result[0, 0, 0] == 0 and result[0, 0, 1] == 0 and result[0, 0, 2] == 0
 
 
 def test_boundary_alpha_midgray_pixel():
-    """중간 회색(128,128,128) → 기본 strength=100, threshold=0.0, gamma≈3.3 → 투명화"""
+    """중간 회색(128,128,128) → RGB=(0,0,0), alpha = (1-0.502)*255 ≈ 127"""
     pixels = np.array([[[128, 128, 128, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
-    # brightness≈0.502, threshold=0.0, blend=1.0, gamma≈3.3 → alpha=(0.498)^3.3*255≈28
-    assert 22 <= result[0, 0, 3] <= 30
+    assert 125 <= result[0, 0, 3] <= 129
+    assert tuple(result[0, 0, :3]) == (0, 0, 0)
 
 
 def test_boundary_alpha_dark_pixel():
-    """짙은 회색(40,40,40) → 기본 strength=100, threshold=0.0 → 투명화 적용"""
+    """짙은 회색(40,40,40) → RGB=(0,0,0), alpha = (1-0.157)*255 ≈ 215"""
     pixels = np.array([[[40, 40, 40, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
-    # brightness≈0.157, threshold=0.0, blend=1.0, gamma≈3.3 → alpha=(0.843)^3.3*255≈144
-    assert 141 <= result[0, 0, 3] <= 147
+    assert 213 <= result[0, 0, 3] <= 217
+    assert tuple(result[0, 0, :3]) == (0, 0, 0)
 
 
 def test_boundary_alpha_bright_boundary():
-    """밝은 경계(230,230,230) → brightness≈0.90, gamma≈3.3 → 강한 투명화"""
+    """밝은 경계(230,230,230) → alpha = (1-0.902)*255 ≈ 25"""
     pixels = np.array([[[230, 230, 230, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
-    # alpha = (1-0.902)^3.3 * 255 ≈ 0.2
-    assert result[0, 0, 3] <= 3
+    assert 23 <= result[0, 0, 3] <= 27
+    assert tuple(result[0, 0, :3]) == (0, 0, 0)
 
 
 def test_boundary_alpha_black_pixel():
-    """검정(0,0,0) → brightness=0 < threshold → 알파 = 255"""
+    """검정(0,0,0) → alpha = 255 (이미 검정이라 변화 없음)"""
     pixels = np.array([[[0, 0, 0, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask)
     assert result[0, 0, 3] == 255
+    assert tuple(result[0, 0, :3]) == (0, 0, 0)
 
 
 def test_boundary_alpha_low_strength():
-    """strength=0 → threshold=1.0 → 모든 픽셀 보호"""
+    """strength=0 → threshold=1.0 → 모든 픽셀 원본 유지 (RGB도 보존)"""
     pixels = np.array([[[230, 230, 230, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask, strength=0)
     assert result[0, 0, 3] == 255
+    assert tuple(result[0, 0, :3]) == (230, 230, 230)
 
 
 def test_boundary_alpha_max_strength():
@@ -181,8 +184,8 @@ def test_boundary_alpha_max_strength():
     pixels = np.array([[[40, 40, 40, 255]]], dtype=np.uint8)
     mask = np.array([[True]])
     result = apply_boundary_alpha(pixels, mask, strength=200)
-    # threshold=-1.0, blend=1.0, gamma≈3.3 → alpha=(0.843)^3.3*255≈144
-    assert 141 <= result[0, 0, 3] <= 147
+    assert 213 <= result[0, 0, 3] <= 217
+    assert tuple(result[0, 0, :3]) == (0, 0, 0)
 
 
 # ── 통합 테스트 ──

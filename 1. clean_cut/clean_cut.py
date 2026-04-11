@@ -243,24 +243,23 @@ def apply_boundary_alpha(
     pixels: np.ndarray,
     boundary_mask: np.ndarray,
     strength: int = 100,
-    gamma_raw: int = 100,
 ) -> np.ndarray:
-    """경계면 픽셀에 명도 기반 알파를 적용한다.
+    """경계면 픽셀을 "흰 배경 위 검정"의 투명도 근사로 변환한다.
 
-    strength — 문턱값 제어 (0~200). 이 밝기 이상인 픽셀만 투명화 대상.
+    원본 픽셀이 회색일 때, 흰 배경 위에 검정을 (1 - brightness) 알파로
+    얹으면 같은 회색이 재현된다는 사실에 근거한다.
+
+      RGB → (0, 0, 0)
+      alpha → (1 - brightness) * 255
+
+    strength — 문턱값 제어 (0~200). 이 밝기 이상인 픽셀만 변환 대상.
       threshold = 1.0 - strength / 100
-      strength=0   → threshold=1.0 (투명화 거의 없음)
+      strength=0   → threshold=1.0 (변환 거의 없음)
       strength=100 → threshold=0.0 (기본, 모든 경계 픽셀 대상)
       strength=200 → threshold=-1.0 (전환 구간까지 무시, 완전 적용)
 
-    gamma_raw — 알파 곡선 제어.
-      gamma = gamma_raw / 30
-      gamma_raw=30  → gamma=1.0 (선형)
-      gamma_raw=100 → gamma=3.3 (기본, 공격적)
-      gamma_raw=200 → gamma=6.7 (매우 공격적)
-
-    alpha = (1 - brightness) ^ gamma * 255
-    문턱값 미만은 원본 알파 유지, 문턱값~문턱값+0.1 구간은 부드러운 전환.
+    문턱값 미만은 원본 픽셀 유지, 문턱값~문턱값+0.1 구간은 RGB/알파를
+    동시에 부드럽게 보간한다.
     """
     result = pixels.copy()
     ys, xs = np.where(boundary_mask)
@@ -273,13 +272,15 @@ def apply_boundary_alpha(
 
     brightness = (r + g + b) / (3.0 * 255.0)
     threshold = 1.0 - strength / 100.0
-    gamma = max(gamma_raw, 1) / 30.0
-    alpha = (np.power(1.0 - brightness, gamma) * 255.0).clip(0, 255)
+    new_alpha = ((1.0 - brightness) * 255.0).clip(0, 255)
 
-    # 문턱값 미만 → 원본 알파 유지, 문턱값~문턱값+0.1 → 부드러운 전환
     blend = np.clip((brightness - threshold) / 0.1, 0.0, 1.0)
     original_alpha = result[ys, xs, 3].astype(float)
-    result[ys, xs, 3] = (original_alpha * (1 - blend) + alpha * blend).clip(0, 255).astype(np.uint8)
+    result[ys, xs, 3] = (original_alpha * (1 - blend) + new_alpha * blend).clip(0, 255).astype(np.uint8)
+    # RGB는 검정(0)으로 보간
+    result[ys, xs, 0] = (r * (1 - blend)).clip(0, 255).astype(np.uint8)
+    result[ys, xs, 1] = (g * (1 - blend)).clip(0, 255).astype(np.uint8)
+    result[ys, xs, 2] = (b * (1 - blend)).clip(0, 255).astype(np.uint8)
     return result
 
 
@@ -293,7 +294,6 @@ def run_pipeline(
     threshold: int = 10,
     boundary_depth: int = 1,
     boundary_strength: int = 100,
-    boundary_gamma: int = 100,
     confined: bool = False,
     soft: bool = False,
     exclude_pixels=None,
@@ -334,7 +334,7 @@ def run_pipeline(
     expanded = expand_boundary(boundary, bg_mask, depth=boundary_depth)
     if roi is not None:
         expanded &= roi
-    result = apply_boundary_alpha(result, expanded, strength=boundary_strength, gamma_raw=boundary_gamma)
+    result = apply_boundary_alpha(result, expanded, strength=boundary_strength)
 
     # 가드: 원본보다 불투명해지면 원본 유지 (투명화만 허용)
     result[:, :, 3] = np.minimum(result[:, :, 3], pixels[:, :, 3])
@@ -373,7 +373,6 @@ def _process_bytes(
     exclude_bytes=None,
     white_threshold: int = 10,
     boundary_strength: int = 100,
-    boundary_gamma: int = 100,
     boundary_depth: int = 1,
     confined: bool = False,
     soft: bool = False,
@@ -396,7 +395,7 @@ def _process_bytes(
             ex_img = ex_img.resize(img.size)
         exclude_px = np.array(ex_img)
 
-    result = run_pipeline(px, mask_pixels=mask_px, threshold=white_threshold, boundary_strength=boundary_strength, boundary_gamma=boundary_gamma, boundary_depth=boundary_depth, confined=confined, soft=soft, exclude_pixels=exclude_px)
+    result = run_pipeline(px, mask_pixels=mask_px, threshold=white_threshold, boundary_strength=boundary_strength, boundary_depth=boundary_depth, confined=confined, soft=soft, exclude_pixels=exclude_px)
 
     # 알파=0 픽셀의 RGB를 (0,0,0)으로 정리 — premultiplied alpha 호환
     transparent = result[:, :, 3] == 0
@@ -453,12 +452,11 @@ def serve(port: int = 8765) -> None:
                 exclude_bytes = base64.b64decode(exclude_b64) if exclude_b64 else None
                 white_thresh = int(data.get("white_threshold", 10))
                 strength = int(data.get("boundary_strength", 100))
-                gamma = int(data.get("boundary_gamma", 100))
                 depth = int(data.get("boundary_depth", 1))
                 is_confined = bool(data.get("confined", False))
                 is_soft = bool(data.get("soft", False))
 
-                result_bytes = _process_bytes(image_bytes, mask_bytes, exclude_bytes=exclude_bytes, white_threshold=white_thresh, boundary_strength=strength, boundary_gamma=gamma, boundary_depth=depth, confined=is_confined, soft=is_soft)
+                result_bytes = _process_bytes(image_bytes, mask_bytes, exclude_bytes=exclude_bytes, white_threshold=white_thresh, boundary_strength=strength, boundary_depth=depth, confined=is_confined, soft=is_soft)
             except Exception as e:
                 err_msg = f"{type(e).__name__}: {e}"
                 self.send_response(500)

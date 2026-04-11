@@ -339,18 +339,22 @@ function expandBoundary(boundary, bgMask, w, h, depth) {
   return expanded;
 }
 
-function applyBoundaryAlpha(result, boundary, w, h, strength, gammaRaw) {
+function applyBoundaryAlpha(result, boundary, w, h, strength) {
+  // 경계 픽셀을 "흰 배경 위 검정"의 투명도 근사로 변환:
+  //   RGB → (0,0,0), alpha → (1 - brightness) * 255
   const threshold = 1.0 - strength / 100.0;
-  const gamma = Math.max(gammaRaw, 1) / 30.0;
   for (let i = 0; i < w * h; i++) {
     if (!boundary[i]) continue;
     const pi = i * 4;
     const r = result[pi], g = result[pi+1], b = result[pi+2];
     const brightness = (r + g + b) / (3 * 255);
-    const alpha = Math.pow(1 - brightness, gamma) * 255;
+    const newAlpha = (1 - brightness) * 255;
     const blend = Math.max(0, Math.min(1, (brightness - threshold) / 0.1));
     const origAlpha = result[pi + 3];
-    result[pi + 3] = Math.max(0, Math.min(255, (origAlpha * (1 - blend) + alpha * blend) | 0));
+    result[pi + 3] = Math.max(0, Math.min(255, (origAlpha * (1 - blend) + newAlpha * blend) | 0));
+    result[pi]     = Math.max(0, Math.min(255, (r * (1 - blend)) | 0));
+    result[pi + 1] = Math.max(0, Math.min(255, (g * (1 - blend)) | 0));
+    result[pi + 2] = Math.max(0, Math.min(255, (b * (1 - blend)) | 0));
   }
 }
 
@@ -359,7 +363,6 @@ function runPipeline(imageData, maskData, w, h, opts) {
   const confined = !!opts.confined;
   const soft = !!opts.soft;
   const strength = opts.boundaryStrength ?? 100;
-  const gammaRaw = opts.boundaryGamma ?? 100;
 
   const result = new Uint8ClampedArray(imageData);
   const origAlpha = new Uint8Array(w * h);
@@ -397,7 +400,7 @@ function runPipeline(imageData, maskData, w, h, opts) {
   if (depth > 0) boundary = expandBoundary(boundary, bgMask, w, h, depth);
   if (roi) for (let i = 0; i < w * h; i++) { if (!roi[i]) boundary[i] = 0; }
 
-  applyBoundaryAlpha(result, boundary, w, h, strength, gammaRaw);
+  applyBoundaryAlpha(result, boundary, w, h, strength);
 
   // 가드: 원본보다 불투명해지면 원본 유지
   for (let i = 0; i < w * h; i++) {
@@ -788,7 +791,6 @@ function runAlgorithm(confined = false) {
           confined: confined,
           soft: softRemovalCheckbox.checked,
           boundaryStrength: 100,
-          boundaryGamma: 100,
           boundaryDepth: parseInt(depthInput.value, 10) || 1,
           excludeData: hasExclude ? excludeData : null,
         }
