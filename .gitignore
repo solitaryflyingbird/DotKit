@@ -11,3 +11,6 @@ __pycache__/
 1. clean_cut/테스트 이미지/
 2. idle_motion/config_chest.json
 2. idle_motion/idle_motion_test.py
+
+# 설계 문서 (VCS 밖)
+clean_cut_one_tocuch 설계.md
