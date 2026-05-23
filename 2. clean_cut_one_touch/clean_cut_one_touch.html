@@ -132,6 +132,7 @@ input[type=color] {
 
   <div class="group">
     <button id="bgToggleBtn">배경: 체커보드</button>
+    <button id="copyBtn" disabled>클립보드 복사</button>
     <button id="downloadBtn" disabled>PNG 저장</button>
   </div>
 
@@ -272,6 +273,7 @@ function multiplyToAlpha(srcData, w, h, opts) {
 const fileInput = document.getElementById('fileInput');
 const runBtn = document.getElementById('runBtn');
 const downloadBtn = document.getElementById('downloadBtn');
+const copyBtn = document.getElementById('copyBtn');
 const bgToggleBtn = document.getElementById('bgToggleBtn');
 const modeSelect = document.getElementById('modeSelect');
 const tintColor = document.getElementById('tintColor');
@@ -397,6 +399,7 @@ function runProcess() {
       dstCanvas.style.display = 'block';
       dstEmpty.style.display = 'none';
       downloadBtn.disabled = false;
+      copyBtn.disabled = false;
 
       const dt = (performance.now() - t0).toFixed(1);
       setStatus('완료', 'ok');
@@ -430,6 +433,20 @@ downloadBtn.addEventListener('click', () => {
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, 'image/png');
+});
+
+copyBtn.addEventListener('click', () => {
+  dstCanvas.toBlob(async (blob) => {
+    if (!blob) return;
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': blob }),
+      ]);
+      setStatus('클립보드에 복사됨 (알파 보존 PNG)', 'ok');
+    } catch (err) {
+      setStatus('복사 실패: ' + err.message + ' — PNG 저장으로 대체하세요', 'err');
+    }
   }, 'image/png');
 });
 
